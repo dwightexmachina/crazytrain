@@ -66,12 +66,40 @@ class ScenarioProgress {
     web.window.localStorage.setItem(_key, jsonEncode(all));
   }
 
+  // The LINE CLEAR celebration fires exactly once per scenario.
+  static const _celebratedKey = 'ct_celebrated_v1';
+
+  static bool celebrated(String scenarioId) {
+    final raw = web.window.localStorage.getItem(_celebratedKey);
+    if (raw == null) return false;
+    try {
+      return (jsonDecode(raw) as List).contains(scenarioId);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static void markCelebrated(String scenarioId) {
+    final raw = web.window.localStorage.getItem(_celebratedKey);
+    var list = <dynamic>[];
+    if (raw != null) {
+      try {
+        list = jsonDecode(raw) as List;
+      } catch (_) {}
+    }
+    if (!list.contains(scenarioId)) list.add(scenarioId);
+    web.window.localStorage.setItem(_celebratedKey, jsonEncode(list));
+  }
+
   /// The first stop is always open; each later stop opens once the previous
   /// one has at least one star.
   static bool unlocked(int index) =>
       index == 0 || stars(Scenarios.all[index - 1].id) > 0;
 
-  static void resetAll() => web.window.localStorage.removeItem(_key);
+  static void resetAll() {
+    web.window.localStorage.removeItem(_key);
+    web.window.localStorage.removeItem(_celebratedKey);
+  }
 }
 
 // ------------------------------------------------------------ the line

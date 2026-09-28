@@ -1030,6 +1030,24 @@ void main() {
       expect(resumed.balance, 300);
     });
 
+    test('the final star fires LINE CLEAR exactly once', () {
+      final g = scenarioGame('prairie');
+      g.balance = 2500;
+      g.cowsShooed = 3;
+      expect(g.checkMissions(), isTrue);
+      expect(g.lineClearPending, isFalse,
+          reason: 'developer mission is still open');
+      g.buildings.add(Building(const Cell(1, 1), BuildingType.stop));
+      g.buildings.add(Building(const Cell(1, 3), BuildingType.depot));
+      expect(g.checkMissions(), isTrue);
+      expect(g.lineClearPending, isTrue);
+      g.dismissLineClear();
+      // A fresh boarding of the cleared scenario never replays it.
+      final again = Game(scenario: Scenarios.byId('prairie'), resume: false);
+      expect(again.checkMissions(), isFalse);
+      expect(again.lineClearPending, isFalse);
+    });
+
     test('the line unlocks stop by stop', () {
       web.window.localStorage.clear();
       expect(ScenarioProgress.unlocked(0), isTrue);
@@ -1101,6 +1119,29 @@ void main() {
       // Its panel now offers to resume the world in progress.
       expect(find.text('RESUME'), findsOneWidget);
       expect(find.text('Start fresh'), findsOneWidget);
+    });
+
+    testWidgets('LINE CLEAR appears on the final star and routes to the map',
+        (tester) async {
+      web.window.localStorage.clear();
+      ScenarioProgress.markDone('prairie', 'developer');
+      ScenarioProgress.markDone('prairie', 'cowboy');
+      await toMap(tester);
+      // Two stars have already unlocked The Gorge, so select Prairie first.
+      await tester.tap(find.text('PRAIRIE JUNCTION'));
+      await tester.pump();
+      await tester.tap(find.text('ALL ABOARD'));
+      await tester.pump();
+      final game = tester.widget<BoardView>(find.byType(BoardView)).game;
+      game.balance = 2500; // satisfies the last open mission
+      game.tick(1.1); // mission poll runs once a second
+      await tester.pump();
+      expect(find.text('LINE CLEAR!'), findsOneWidget);
+      expect(find.textContaining('THE GORGE'), findsOneWidget);
+      await tester.tap(find.text('ROUTE MAP'));
+      await tester.pump();
+      expect(find.text('CHOOSE YOUR LINE'), findsOneWidget);
+      expect(find.text('LINE CLEAR!'), findsNothing);
     });
 
     testWidgets('the roundhouse boards the sandbox', (tester) async {

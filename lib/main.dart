@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'model/game.dart';
 import 'model/scenario.dart';
 import 'ui/board_view.dart';
+import 'ui/line_clear.dart';
 import 'ui/palette.dart';
 import 'ui/panel.dart';
 import 'ui/route_map_screen.dart';
@@ -87,18 +88,36 @@ class _TrainMakerAppState extends State<TrainMakerApp> {
                   )
                 else
                   Builder(builder: (context) {
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(
-                          child: BoardView(
-                              key: ValueKey(g.scenario?.id ?? 'sandbox'),
-                              game: g),
-                        ),
-                        ShopPanel(
-                            game: g,
-                            onExitToMap: () => _confirmExitToMap(context)),
-                      ],
+                    return ListenableBuilder(
+                      listenable: g,
+                      builder: (context, _) => Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: BoardView(
+                                    key: ValueKey(g.scenario?.id ?? 'sandbox'),
+                                    game: g),
+                              ),
+                              ShopPanel(
+                                  game: g,
+                                  onExitToMap: () =>
+                                      _confirmExitToMap(context)),
+                            ],
+                          ),
+                          if (g.lineClearPending)
+                            LineClearOverlay(
+                              game: g,
+                              onRouteMap: () {
+                                g.dismissLineClear();
+                                g.saveNow();
+                                setState(() => game = null);
+                              },
+                            ),
+                        ],
+                      ),
                     );
                   }),
                 if (_splash)

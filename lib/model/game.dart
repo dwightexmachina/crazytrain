@@ -152,6 +152,10 @@ class Game extends ChangeNotifier {
   int bestLapPayout = 0; // richest single-lap payout so far
   double _missionTimer = 0;
 
+  /// True while the LINE CLEAR celebration should be on screen (set when
+  /// the scenario's final star latches; fires once per scenario, ever).
+  bool lineClearPending = false;
+
   // Legacy single-train accessors: the first train is the original one.
   double get s => trains.first.s;
   set s(double v) => trains.first.s = v;
@@ -1606,7 +1610,19 @@ class Game extends ChangeNotifier {
       toasts.add(Toast(st.x + 0.5, st.y - 1.2, '★ ${m.title}', big: true));
       won = true;
     }
+    if (won &&
+        sc.missions.isNotEmpty &&
+        missionsDone.length >= sc.missions.length &&
+        !ScenarioProgress.celebrated(sc.id)) {
+      ScenarioProgress.markCelebrated(sc.id);
+      lineClearPending = true;
+    }
     return won;
+  }
+
+  void dismissLineClear() {
+    lineClearPending = false;
+    notifyListeners();
   }
 
   // ------------------------------------------------------------ persistence
