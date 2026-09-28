@@ -1058,6 +1058,62 @@ void main() {
     });
   });
 
+  group('track routing', () {
+    test('routes a clean straight line between anchor and target', () {
+      final g = flatGame();
+      g.balance = 10000;
+      final route = g.routeTrack(const Cell(4, 1), const Cell(9, 1));
+      expect(route, isNotNull);
+      expect(route!.length, 6);
+      expect(route.every((c) => c.y == 1), isTrue, reason: 'no wiggles');
+      final plan = g.planTrack(route);
+      expect(plan.pieces.length, 6, reason: 'planTrack accepts every cell');
+      expect(plan.pieces.every((p) => p.kind == TrackKind.ew), isTrue);
+    });
+
+    test('bends once for an L, never staircases', () {
+      final g = flatGame();
+      g.balance = 10000;
+      final route = g.routeTrack(const Cell(4, 0), const Cell(9, 2))!;
+      final plan = g.planTrack(route);
+      expect(plan.pieces.length, route.length);
+      final curves = plan.pieces.where((p) => p.kind.isCurve).length;
+      expect(curves, 1, reason: 'one clean bend, not a staircase');
+    });
+
+    test('detours around a building blocking the straight line', () {
+      final g = flatGame();
+      g.balance = 10000;
+      g.buildings.add(Building(const Cell(6, 1), BuildingType.stop));
+      final route = g.routeTrack(const Cell(4, 1), const Cell(9, 1))!;
+      expect(route.contains(const Cell(6, 1)), isFalse);
+      expect(route.first, const Cell(4, 1));
+      expect(route.last, const Cell(9, 1));
+      final plan = g.planTrack(route);
+      expect(plan.pieces.length, route.length);
+    });
+
+    test('a blocked target has no route', () {
+      final g = flatGame();
+      g.buildings.add(Building(const Cell(9, 1), BuildingType.stop));
+      expect(g.routeTrack(const Cell(4, 1), const Cell(9, 1)), isNull);
+      expect(g.routeTrack(const Cell(4, 1), const Cell(4, 1)),
+          [const Cell(4, 1)],
+          reason: 'anchor alone still previews as a tap');
+    });
+
+    test('routes bridge across the gorge and the plan prices it', () {
+      web.window.localStorage.clear();
+      final g = Game(scenario: Scenarios.byId('gorge'), resume: false);
+      g.balance = 10000;
+      final route = g.routeTrack(const Cell(8, 2), const Cell(16, 2))!;
+      final plan = g.planTrack(route);
+      expect(plan.pieces.length, route.length,
+          reason: 'the whole crossing must be buildable');
+      expect(plan.pieces.any((p) => p.bridge), isTrue);
+    });
+  });
+
   group('route map', () {
     Future<void> toMap(WidgetTester tester) async {
       await tester.pumpWidget(const TrainMakerApp());

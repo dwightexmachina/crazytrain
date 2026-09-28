@@ -23,7 +23,8 @@ class _BoardViewState extends State<BoardView>
   late final Ticker _ticker;
   final Stopwatch _clock = Stopwatch();
 
-  final List<Cell> _dragCells = [];
+  final List<Cell> _dragCells = []; // holds just the drag's anchor cell
+  Cell? _routeTarget; // last routed hover cell, to skip repeat work
   final ValueNotifier<TrackPlan?> _plan = ValueNotifier(null);
   final ValueNotifier<Cell?> _hover = ValueNotifier(null);
 
@@ -156,6 +157,7 @@ class _BoardViewState extends State<BoardView>
         _dragCells
           ..clear()
           ..add(c);
+        _routeTarget = c;
         _plan.value = game.planTrack(_dragCells);
       case Tool.bulldoze:
         game.bulldoze(c);
@@ -212,23 +214,14 @@ class _BoardViewState extends State<BoardView>
         break;
     }
     if (game.tool != Tool.track || _dragCells.isEmpty) return;
-    if (c == _dragCells.last) return;
-    // Backtrack: pointer returned to the previous cell.
-    if (_dragCells.length >= 2 && c == _dragCells[_dragCells.length - 2]) {
-      _dragCells.removeLast();
-    } else {
-      // Manhattan-fill any gap from fast pointer movement (x first, then y).
-      var cur = _dragCells.last;
-      while (cur.x != c.x) {
-        cur = Cell(cur.x + (c.x > cur.x ? 1 : -1), cur.y);
-        _dragCells.add(cur);
-      }
-      while (cur.y != c.y) {
-        cur = Cell(cur.x, cur.y + (c.y > cur.y ? 1 : -1));
-        _dragCells.add(cur);
-      }
-    }
-    _plan.value = game.planTrack(_dragCells);
+    // Rubber-band routing: only the anchor and the current cell matter —
+    // the game routes the cheapest legal line between them, and the ghost
+    // shows exactly what release would build.
+    if (c == _routeTarget) return;
+    _routeTarget = c;
+    final anchor = _dragCells.first;
+    final route = game.routeTrack(anchor, c);
+    _plan.value = game.planTrack(route ?? [anchor]);
   }
 
   void _pointerUp(Offset local) {
@@ -240,6 +233,7 @@ class _BoardViewState extends State<BoardView>
     game.levelTarget = null; // each level drag re-arms from its press
     final plan = _plan.value;
     _dragCells.clear();
+    _routeTarget = null;
     _plan.value = null;
     switch (game.tool) {
       case Tool.track:

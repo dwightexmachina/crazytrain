@@ -697,6 +697,156 @@ class Game extends ChangeNotifier {
     return null;
   }
 
+  /// Rubber-band routing for the track tool: the cheapest legal cell path
+  /// from [from] to [to], found by A* over (cell, entry edge, rail height)
+  /// states priced with the real piece rules — so the routed ghost costs
+  /// what [planTrack] will charge. Returns null when no route exists.
+  ///
+  /// Riding existing matching track is nearly free, straights beat curves,
+  /// and ties prefer continuing the current heading, which keeps routes as
+  /// long runs with single clean bends instead of staircases.
+  List<Cell>? routeTrack(Cell from, Cell to) {
+    if (!inBounds(from) || !inBounds(to)) return null;
+    bool occupied(Cell c) =>
+        _cellBlocked(c) ||
+        launchpads.containsKey(c) ||
+        tunnels.containsKey(c) ||
+        switches.containsKey(c);
+    if (occupied(from) || occupied(to)) return null;
+    if (from == to) return [from];
+
+    // Legality + price of the piece at [c] entered from [toPrev] (edge
+    // toward the previous cell; null at the anchor) and left via [toNext],
+    // arriving at rail height [entryH]. Mirrors planTrack's rules.
+    (int exitH, int price)? piece(Cell c, Dir? toPrev, Dir toNext, int? entryH) {
+      final kind = toPrev == null
+          ? ((toNext == Dir.e || toNext == Dir.w) ? TrackKind.ew : TrackKind.ns)
+          : TrackKind.fromDirs(toPrev, toNext);
+      if (kind == null) return null;
+      final existing = board[c];
+      if (existing != null && existing != kind) return null;
+      final wet = isWater(c);
+      final int eIn, eOut;
+      if (wet) {
+        final lvl = deck[c] ?? entryH;
+        if (lvl == null) return null; // can't begin a bridge over open water
+        eIn = eOut = lvl;
+      } else if (kind.isCurve) {
+        if (!heights.isFlat(c)) return null;
+        eIn = eOut = heights.floorOf(c);
+      } else {
+        final dirs = kind.conn.toList();
+        final entryDir = toPrev ?? dirs.firstWhere((d) => d != toNext);
+        final exitDir = dirs.firstWhere((d) => d != entryDir);
+        final a = _edgeLevel(c, entryDir), b = _edgeLevel(c, exitDir);
+        if (a == null || b == null) return null; // side-slope under the rail
+        if ((a - b).abs() > 1) return null; // too steep
+        eIn = a;
+        eOut = b;
+      }
+      if (entryH != null && eIn != entryH) return null; // grade mismatch
+      // A token cost on free rides keeps the search from wandering along
+      // existing rail for no reason; planTrack still prices them at $0.
+      final price = existing == kind ? 1 : _piecePrice(kind, c);
+      return (eOut, price);
+    }
+
+    // State key: (cell, entry-edge index or -1, rail height or 999).
+    (int, int, int, int) key(Cell c, Dir? toPrev, int? h) =>
+        (c.x, c.y, toPrev?.index ?? -1, h ?? 999);
+
+    final gScore = <(int, int, int, int), int>{};
+    final parent = <(int, int, int, int), ((int, int, int, int), Cell)>{};
+    // Open list: (f, tiebreak sequence, g, cell, toPrev, entryH).
+    final open = <(int, int, int, Cell, Dir?, int?)>[];
+    var seq = 0;
+    void push(int g, Cell c, Dir? toPrev, int? h) {
+      final f = g +
+          priceStraight * ((c.x - to.x).abs() + (c.y - to.y).abs());
+      open.add((f, seq++, g, c, toPrev, h));
+      // Sift up (binary min-heap by f, then insertion order).
+      var i = open.length - 1;
+      while (i > 0) {
+        final p = (i - 1) >> 1;
+        if (open[p].$1 < open[i].$1 ||
+            (open[p].$1 == open[i].$1 && open[p].$2 < open[i].$2)) {
+          break;
+        }
+        final t = open[p];
+        open[p] = open[i];
+        open[i] = t;
+        i = p;
+      }
+    }
+
+    (int, int, int, Cell, Dir?, int?) pop() {
+      final top = open.first;
+      final last = open.removeLast();
+      if (open.isNotEmpty) {
+        open[0] = last;
+        var i = 0;
+        while (true) {
+          final l = 2 * i + 1, r = 2 * i + 2;
+          var m = i;
+          for (final j in [l, r]) {
+            if (j < open.length &&
+                (open[j].$1 < open[m].$1 ||
+                    (open[j].$1 == open[m].$1 && open[j].$2 < open[m].$2))) {
+              m = j;
+            }
+          }
+          if (m == i) break;
+          final t = open[m];
+          open[m] = open[i];
+          open[i] = t;
+          i = m;
+        }
+      }
+      return top;
+    }
+
+    gScore[key(from, null, null)] = 0;
+    push(0, from, null, null);
+    var pops = 0;
+    while (open.isNotEmpty && pops++ < 30000) {
+      final (_, _, g, c, toPrev, h) = pop();
+      final ck = key(c, toPrev, h);
+      if (g > (gScore[ck] ?? 1 << 30)) continue; // stale heap entry
+      if (c == to) {
+        // Reconstruct the cell chain; planTrack finalizes endpoint kinds.
+        final cells = <Cell>[c];
+        var k = ck;
+        while (parent.containsKey(k)) {
+          final (pk, pc) = parent[k]!;
+          cells.add(pc);
+          k = pk;
+        }
+        return cells.reversed.toList();
+      }
+      // Prefer continuing the current heading on ties: try it first.
+      final ahead = toPrev?.opposite;
+      final exits = [
+        ?ahead,
+        for (final d in Dir.values)
+          if (d != ahead) d,
+      ];
+      for (final toNext in exits) {
+        if (toNext == toPrev) continue; // doubling back onto itself
+        final n = c.step(toNext);
+        if (!inBounds(n) || occupied(n)) continue;
+        final r = piece(c, toPrev, toNext, h);
+        if (r == null) continue;
+        final ng = g + r.$2;
+        final nk = key(n, toNext.opposite, r.$1);
+        if (ng >= (gScore[nk] ?? 1 << 30)) continue;
+        gScore[nk] = ng;
+        parent[nk] = (ck, c);
+        push(ng, n, toNext.opposite, r.$1);
+      }
+    }
+    return null;
+  }
+
   void commitTrack(TrackPlan plan) {
     if (plan.isEmpty || plan.cost > balance) return;
     for (final p in plan.pieces) {
