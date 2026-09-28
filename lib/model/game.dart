@@ -79,7 +79,7 @@ class TrackPlan {
 
 class Game extends ChangeNotifier {
   static const int startCols = 16, startRows = 12;
-  static const int maxCols = 32, maxRows = 24;
+  static const int maxCols = 64, maxRows = 48;
   static const int expandStep = 4; // cells added per land deed
   static const int priceStraight = 10, priceCurve = 15, priceCar = 120;
   static const int priceBridge = 25; // surcharge for track over water

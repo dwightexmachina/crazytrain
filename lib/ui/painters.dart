@@ -484,11 +484,30 @@ class StaticBoardPainter extends CustomPainter {
     ]..sort((a, b) => v
         .depthKey(a.x + 0.5, a.y + 0.5)
         .compareTo(v.depthKey(b.x + 0.5, b.y + 0.5)));
+    // Viewport culling: cells whose quad lies entirely off-canvas draw
+    // nothing. The top margin leaves room for structures above the ground.
+    final cullPad = v.s * 1.2;
+    final cullRect = Rect.fromLTRB(
+        -cullPad, -cullPad, size.width + cullPad, size.height + cullPad);
     for (final cell in cells) {
       {
         final x = cell.x, y = cell.y;
         final (ha, hb, hd, he) = hf.corners(cell);
         final xd = x.toDouble(), yd = y.toDouble();
+        final c0 = v.pt(xd, yd, ha * kZStep);
+        final c1 = v.pt(xd + 1, yd, hb * kZStep);
+        final c2 = v.pt(xd + 1, yd + 1, hd * kZStep);
+        final c3 = v.pt(xd, yd + 1, he * kZStep);
+        final minX = math.min(math.min(c0.dx, c1.dx), math.min(c2.dx, c3.dx));
+        final maxX = math.max(math.max(c0.dx, c1.dx), math.max(c2.dx, c3.dx));
+        final minY = math.min(math.min(c0.dy, c1.dy), math.min(c2.dy, c3.dy));
+        final maxY = math.max(math.max(c0.dy, c1.dy), math.max(c2.dy, c3.dy));
+        if (maxX < cullRect.left ||
+            minX > cullRect.right ||
+            maxY < cullRect.top ||
+            minY > cullRect.bottom) {
+          continue;
+        }
         final tri1 = [(xd, yd, ha.toDouble()), (xd + 1, yd, hb.toDouble()), (xd, yd + 1, he.toDouble())];
         final tri2 = [(xd + 1, yd, hb.toDouble()), (xd + 1, yd + 1, hd.toDouble()), (xd, yd + 1, he.toDouble())];
         for (final tri in [tri1, tri2]) {
@@ -502,10 +521,7 @@ class StaticBoardPainter extends CustomPainter {
               [for (final p in tri) v.pt(p.$1, p.$2, p.$3 * kZStep)]);
         }
 
-        final q0 = v.pt(xd, yd, ha * kZStep);
-        final q1 = v.pt(xd + 1, yd, hb * kZStep);
-        final q2 = v.pt(xd + 1, yd + 1, hd * kZStep);
-        final q3 = v.pt(xd, yd + 1, he * kZStep);
+        final q0 = c0, q1 = c1, q2 = c2, q3 = c3;
 
         // Water table: a surface polygon clipped to the shoreline, computed
         // where the terrain crosses the water level along each tile edge.
