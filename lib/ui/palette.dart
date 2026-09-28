@@ -37,6 +37,11 @@ abstract final class Pal {
   static const car = (Color(0xFF93AEC9), Color(0xFF6E88A3), Color(0xFF7F9AB6));
   static const engine = (Color(0xFFD98B7C), Color(0xFFB0685C), Color(0xFFC4786A));
   static const cab = (Color(0xFFE5A192), Color(0xFFB0685C), Color(0xFFC4786A));
+  static const engine2 = (Color(0xFF8FB08A), Color(0xFF6E8C69), Color(0xFF7E9E79));
+  static const cab2 = (Color(0xFFA5C2A0), Color(0xFF6E8C69), Color(0xFF7E9E79));
+  static const car2 = (Color(0xFFD9C9A3), Color(0xFFB3A480), Color(0xFFC6B691));
+  static const signalGo = Color(0xFF6F9E7C);
+  static const signalStop = Color(0xFFC25B4A);
   static const stack = (Color(0xFF5B564C), Color(0xFF403C34), Color(0xFF4D473E));
 
   static const good = Color(0xFF6F9E7C);

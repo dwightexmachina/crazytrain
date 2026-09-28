@@ -272,8 +272,41 @@ class _ShopPanelState extends State<ShopPanel> {
           tag: '\$${Game.priceCar}',
           chip: '\$${Game.priceCar}',
           enabled: game.balance >= Game.priceCar,
-          desc: 'Adds a car · bigger payouts every lap.',
+          desc:
+              'Adds a car to your shorter train · bigger payouts every lap.',
           onTap: game.buyCar,
+        ),
+        if (game.trains.length == 1)
+          _ShopItem(
+            icon: Icons.tram_rounded,
+            title: 'Second train',
+            tag: '\$1.5k',
+            chip: '\$${Game.priceSecondTrain}',
+            enabled: game.balance >= Game.priceSecondTrain,
+            desc:
+                'A second engine running the opposite direction — double the laps. Give it signals, or enjoy the fireworks.',
+            onTap: game.buySecondTrain,
+          )
+        else
+          const _ShopItem(
+            icon: Icons.tram_rounded,
+            title: 'Second train',
+            tag: 'OWNED',
+            chip: 'owned',
+            chipMuted: true,
+            enabled: false,
+            desc:
+                'Your opposite-direction train is on the rails. New cars go to the shorter train.',
+          ),
+        _toolItem(
+          tool: Tool.signal,
+          icon: Icons.traffic_rounded,
+          title: 'Signal',
+          tag: '\$${Game.priceSignal}',
+          chip: '\$${Game.priceSignal}',
+          enabled: game.balance >= Game.priceSignal,
+          desc:
+              'Tap track to plant a block signal: a train waits there while the stretch ahead (to the next signal) is occupied. Tap a signal to remove it.',
         ),
         _toolItem(
           tool: Tool.stop,
@@ -520,6 +553,8 @@ class _ShopPanelState extends State<ShopPanel> {
         'Tap a track piece, then an empty side: that side becomes the junction. Trains entering the junction side follow the thrown route; with no tool selected, tap a switch to flip it. Use two switches to build an alternate line.',
       Tool.tunnel =>
         'Tap two flat cells in a straight line, at the same height, with the mountain between them. Run track up to each portal — the train dives through. Mind your sculpting: strip the cover and the bore collapses.',
+      Tool.signal =>
+        'Tap track to place a signal; tap a signal to remove it. Trains hold at a red while the block ahead — up to the next signal — is occupied. Build a passing loop with two switches, signal both ends, and opposite trains will take turns. If they crash, tap the wreck to pay the crane (\$${Game.priceRerail}).',
       Tool.none =>
         'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };

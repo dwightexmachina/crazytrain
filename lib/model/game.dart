@@ -37,6 +37,21 @@ class Cow {
   Cow(this.cell, this.moveIn);
 }
 
+/// One train: its own traced route, position, cars and direction. The
+/// second train runs the network in reverse, so facing switches route the
+/// two independently — that's what makes passing loops work.
+class Train {
+  double s = 0; // position along [path], in steps
+  int cars;
+  final bool reversed;
+  bool wrecked = false;
+  int lapBonus = 0;
+  List<PathStep>? path; // null = no closed route in this direction
+  List<PathStep>? lastPath; // keeps a halted train visible
+  Train({required this.cars, required this.reversed});
+  List<PathStep>? get renderPath => path ?? lastPath;
+}
+
 enum Tool {
   none,
   track,
@@ -49,6 +64,7 @@ enum Tool {
   launchpad,
   switchTrack,
   tunnel,
+  signal,
 }
 
 class Toast {
@@ -88,6 +104,9 @@ class Game extends ChangeNotifier {
   static const int priceLaunchpad = 300; // per linked pair of pads
   static const int priceSwitch = 500; // converts a track piece to a turnout
   static const int priceTunnel = 400; // per bored portal pair
+  static const int priceSignal = 150; // block signal on a track cell
+  static const int priceSecondTrain = 1500; // opposite-direction engine
+  static const int priceRerail = 250; // crane fee after a crash
   static const double tilesPerSecond = 2.2;
 
   final Map<Cell, TrackKind> board = {};
@@ -111,13 +130,23 @@ class Game extends ChangeNotifier {
   final Map<Cell, Cell> tunnels = {};
   Cell? pendingTunnel; // first portal of a pair being placed
   final List<Cow> cows = [];
+  final List<Train> trains = [Train(cars: 1, reversed: false)];
+  final Set<Cell> signals = {};
+  final Set<Cell> heldSignals = {}; // signals actively holding a train
   int cols = startCols, rows = startRows;
   int deeds = 0; // land deeds bought; each one raises the next deed's price
   int balance = 80;
-  int cars = 1;
   int speed = 1; // 0 = paused, 1, 2
   Tool tool = Tool.none;
   bool cowBlocked = false;
+
+  // Legacy single-train accessors: the first train is the original one.
+  double get s => trains.first.s;
+  set s(double v) => trains.first.s = v;
+  int get cars => trains.first.cars;
+  set cars(int v) => trains.first.cars = v;
+  List<PathStep>? get path => trains.first.path;
+  List<PathStep>? get renderPath => trains.first.renderPath;
 
   final math.Random _rng = math.Random();
 
@@ -125,29 +154,27 @@ class Game extends ChangeNotifier {
   /// only re-rasterizes when this changes.
   int structureRev = 0;
 
-  List<PathStep>? path; // null = broken loop
-  List<PathStep>? _lastPath; // last good loop, so a halted train stays visible
-  List<PathStep>? get renderPath => path ?? _lastPath;
-  double s = 0; // engine position along path, in tiles
-  int lapBonus = 0;
   final List<Toast> toasts = [];
 
   Building get station => buildings.first;
   int get trackLength => path?.length ?? 0;
-  int get projectedPayout =>
-      trackLength == 0 ? 0 : cars * trackLength + _projectedBonuses();
 
-  int _projectedBonuses() {
+  int get projectedPayout {
     var sum = 0;
-    for (final b in buildings) {
-      if (b.type.bonus > 0 && b.trigger != null && _onPath(b.trigger!)) {
-        sum += b.type.bonus;
+    for (final t in trains) {
+      final p = t.path;
+      if (p == null) continue;
+      sum += t.cars * p.length;
+      for (final b in buildings) {
+        if (b.type.bonus > 0 &&
+            b.trigger != null &&
+            p.any((st) => st.cell == b.trigger)) {
+          sum += b.type.bonus;
+        }
       }
     }
     return sum;
   }
-
-  bool _onPath(Cell c) => path?.any((st) => st.cell == c) ?? false;
 
   /// The cell dips below the water table.
   bool isWater(Cell c) => heights.isWet(c);
@@ -218,10 +245,11 @@ class Game extends ChangeNotifier {
     _generateTerrain();
     _spawnCows(2);
     balance = 80;
-    cars = 1;
-    s = 0;
-    lapBonus = 0;
-    _lastPath = null;
+    trains
+      ..clear()
+      ..add(Train(cars: 1, reversed: false));
+    signals.clear();
+    heldSignals.clear();
   }
 
   bool _protectedCell(Cell c) =>
@@ -406,20 +434,35 @@ class Game extends ChangeNotifier {
   void _rebuildPath() {
     structureRev++;
     final trigger = station.trigger;
-    List<PathStep>? p;
-    if (trigger != null && board.containsKey(trigger)) {
-      final kind = board[trigger]!;
-      p = traceLoop(board, trigger, kind.conn.first,
-              pads: launchpads, tunnels: tunnels, switches: switches) ??
-          traceLoop(board, trigger, kind.conn.last,
-              pads: launchpads, tunnels: tunnels, switches: switches);
-    }
-    path = p;
-    if (p != null) {
-      _lastPath = p;
-      if (s >= p.length) s = 0;
-    } else if (_lastPath != null && s >= _lastPath!.length) {
-      s = 0;
+    for (final tr in trains) {
+      List<PathStep>? p;
+      if (trigger != null && board.containsKey(trigger)) {
+        final kind = board[trigger]!;
+        // The second train prefers the opposite direction around the loop.
+        final dirs = tr.reversed
+            ? [kind.conn.last, kind.conn.first]
+            : [kind.conn.first, kind.conn.last];
+        p = traceLoop(board, trigger, dirs[0],
+                pads: launchpads, tunnels: tunnels, switches: switches) ??
+            traceLoop(board, trigger, dirs[1],
+                pads: launchpads, tunnels: tunnels, switches: switches);
+      }
+      // Keep the train where it stands when the route re-forms around it.
+      final old = tr.path;
+      if (p != null && old != null && old.isNotEmpty) {
+        final cur = old[tr.s.floor() % old.length];
+        final frac = tr.s - tr.s.floorToDouble();
+        final ni =
+            p.indexWhere((st) => st.cell == cur.cell && st.entry == cur.entry);
+        tr.s = ni >= 0 ? ni + frac : 0;
+      }
+      tr.path = p;
+      if (p != null) {
+        tr.lastPath = p;
+        if (tr.s >= p.length) tr.s = 0;
+      } else if (tr.lastPath != null && tr.s >= tr.lastPath!.length) {
+        tr.s = 0;
+      }
     }
     // Re-resolve building triggers (their track may have been bulldozed).
     for (final b in buildings) {
@@ -722,10 +765,49 @@ class Game extends ChangeNotifier {
   bool buyCar() {
     if (balance < priceCar) return false;
     balance -= priceCar;
-    cars++;
+    // The shorter train gets the new car.
+    trains.reduce((a, b) => a.cars <= b.cars ? a : b).cars++;
     _save();
     notifyListeners();
     return true;
+  }
+
+  bool buySecondTrain() {
+    if (trains.length > 1 || balance < priceSecondTrain) return false;
+    balance -= priceSecondTrain;
+    final t = Train(cars: 1, reversed: true);
+    trains.add(t);
+    _rebuildPath();
+    final len = t.path?.length.toDouble();
+    if (len != null && len > 0) {
+      t.s = len / 2; // start on the far side of the loop
+    }
+    _save();
+    notifyListeners();
+    return true;
+  }
+
+  /// Place a block signal on a track cell, or tap an existing one to
+  /// remove it (half refund). Trains stop at a signal while the block
+  /// beyond it — up to the next signal — is occupied by the other train.
+  String? tapSignal(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (signals.contains(c)) {
+      signals.remove(c);
+      balance += priceSignal ~/ 2;
+      structureRev++;
+      _save();
+      notifyListeners();
+      return null;
+    }
+    if (!board.containsKey(c)) return 'Signals sit on track';
+    if (balance < priceSignal) return 'Not enough money';
+    balance -= priceSignal;
+    signals.add(c);
+    structureRev++;
+    _save();
+    notifyListeners();
+    return null;
   }
 
   // ------------------------------------------------------------ terraform (elevation)
@@ -1148,6 +1230,7 @@ class Game extends ChangeNotifier {
     if (piece != null) {
       board.remove(c);
       deck.remove(c);
+      signals.remove(c);
       balance += _piecePrice(piece, c) ~/ 2;
       _rebuildPath();
       _save();
@@ -1223,6 +1306,136 @@ class Game extends ChangeNotifier {
 
   // ------------------------------------------------------------ simulation
 
+  /// Cells under a train's engine and cars, sampled along its path.
+  Set<Cell> occupiedBy(Train tr) {
+    final p = tr.renderPath;
+    if (p == null || p.isEmpty) return const {};
+    final out = <Cell>{};
+    final len = p.length.toDouble();
+    final tail = 0.85 * tr.cars + 0.6;
+    for (var d = 0.0; d <= tail; d += 0.4) {
+      var pos = tr.s - d;
+      while (pos < 0) {
+        pos += len;
+      }
+      out.add(p[pos.floor() % p.length].cell);
+    }
+    return out;
+  }
+
+  /// The block a signal at path index [entryIdx] protects for [tr]: cells
+  /// ahead until the next signal (or twelve cells). Occupied by another
+  /// train means hold.
+  bool _blockOccupied(Train tr, int entryIdx) {
+    final p = tr.path!;
+    final others = <Cell>{};
+    for (final o in trains) {
+      if (!identical(o, tr)) others.addAll(occupiedBy(o));
+    }
+    if (others.isEmpty) return false;
+    var idx = entryIdx;
+    for (var i = 0; i < 12; i++) {
+      final cell = p[idx % p.length].cell;
+      if (others.contains(cell)) return true;
+      if (i > 0 && signals.contains(cell)) break; // next signal ends the block
+      idx++;
+    }
+    return false;
+  }
+
+  void _advance(Train tr, double dt) {
+    final p = tr.path;
+    if (p == null || tr.wrecked) return;
+    final len = p.length;
+    // Advance cell by cell so bonuses and payouts fire even when a single
+    // tick covers several cells (throttled/background tabs catch up).
+    var adv = dt * tilesPerSecond * speed;
+    var paidOut = false;
+    while (adv > 0) {
+      final idx = tr.s.floor();
+      final nextIdx = (idx + 1) % len;
+      final nextCell = p[nextIdx].cell;
+      if (_cowAt(nextCell)) {
+        cowBlocked = true;
+        tr.s = math.min(tr.s, idx + 0.94); // pull up short of the cow
+        break;
+      }
+      if (signals.contains(nextCell) && _blockOccupied(tr, nextIdx)) {
+        heldSignals.add(nextCell);
+        tr.s = math.min(tr.s, idx + 0.94); // held at the red
+        break;
+      }
+      // Grades stretch or shrink the time a step takes.
+      final f = stepCost(p[idx % len]);
+      final toBoundary = idx + 1 - tr.s;
+      if (adv < toBoundary * f) {
+        tr.s += adv / f;
+        break;
+      }
+      tr.s += toBoundary;
+      adv -= toBoundary * f;
+      if (tr.s >= len) {
+        tr.s = 0;
+        final payout = tr.cars * len + tr.lapBonus;
+        balance += payout;
+        tr.lapBonus = 0;
+        paidOut = true;
+        final st = station.cell;
+        if (toasts.length < 6) {
+          toasts.add(Toast(st.x + 0.5, st.y - 0.6, '+\$$payout', big: true));
+        }
+      }
+      // s sits exactly on a cell boundary: the train just entered this cell.
+      final cell = p[tr.s.floor() % len].cell;
+      for (final b in buildings) {
+        if (b.type.bonus > 0 && b.trigger == cell) {
+          tr.lapBonus += b.type.bonus;
+          if (toasts.length < 6) {
+            toasts.add(
+                Toast(b.cell.x + 0.5, b.cell.y - 0.4, '+\$${b.type.bonus}'));
+          }
+        }
+      }
+    }
+    if (paidOut) _save();
+  }
+
+  void _detectCrash() {
+    if (trains.length < 2) return;
+    final a = trains[0], b = trains[1];
+    if (a.wrecked || b.wrecked) return;
+    final hit = occupiedBy(a).intersection(occupiedBy(b));
+    if (hit.isEmpty) return;
+    a.wrecked = true;
+    b.wrecked = true;
+    final at = hit.first;
+    toasts.add(Toast(at.x + 0.5, at.y - 0.4, 'CRASH!', big: true));
+  }
+
+  /// Tap a wreck (Select mode) to pay the crane and get both trains moving
+  /// again, separated so they don't immediately re-collide.
+  String? tapWreck(Cell c) {
+    if (!trains.any((t) => t.wrecked)) return null;
+    final hit = trains.any((t) => t.wrecked && occupiedBy(t).contains(c));
+    if (!hit) return null;
+    if (balance < priceRerail) return 'Not enough money';
+    balance -= priceRerail;
+    for (final t in trains) {
+      t.wrecked = false;
+    }
+    if (trains.length > 1) {
+      final t2 = trains[1];
+      final len = t2.path?.length.toDouble();
+      if (len != null && len > 0) t2.s = (t2.s + len / 2) % len;
+    }
+    if (toasts.length < 6) {
+      toasts.add(Toast(c.x + 0.5, c.y - 0.4, 'Re-railed −\$$priceRerail'));
+    }
+    _save();
+    notifyListeners();
+    return null;
+  }
+
   void tick(double dt) {
     var dirty = false;
     for (final t in toasts) {
@@ -1236,55 +1449,23 @@ class Game extends ChangeNotifier {
       _updateCows(dt);
       dirty = true;
     }
-    final p = path;
     cowBlocked = false;
-    if (p != null && speed > 0) {
-      final len = p.length;
-      // Advance cell by cell so bonuses and payouts fire even when a single
-      // tick covers several cells (throttled/background tabs catch up).
-      var adv = dt * tilesPerSecond * speed;
-      var paidOut = false;
-      while (adv > 0) {
-        final idx = s.floor();
-        final nextIdx = (idx + 1) % len;
-        if (_cowAt(p[nextIdx].cell)) {
-          cowBlocked = true;
-          s = math.min(s, idx + 0.94); // pull up short of the cow
-          break;
-        }
-        // Grades stretch or shrink the time a step takes.
-        final f = stepCost(p[idx % len]);
-        final toBoundary = idx + 1 - s;
-        if (adv < toBoundary * f) {
-          s += adv / f;
-          break;
-        }
-        s += toBoundary;
-        adv -= toBoundary * f;
-        if (s >= len) {
-          s = 0;
-          final payout = cars * len + lapBonus;
-          balance += payout;
-          lapBonus = 0;
-          paidOut = true;
-          final st = station.cell;
-          if (toasts.length < 6) {
-            toasts.add(Toast(st.x + 0.5, st.y - 0.6, '+\$$payout', big: true));
-          }
-        }
-        // s sits exactly on a cell boundary: the train just entered this cell.
-        final cell = p[s.floor() % len].cell;
-        for (final b in buildings) {
-          if (b.type.bonus > 0 && b.trigger == cell) {
-            lapBonus += b.type.bonus;
-            if (toasts.length < 6) {
-              toasts.add(
-                  Toast(b.cell.x + 0.5, b.cell.y - 0.4, '+\$${b.type.bonus}'));
-            }
-          }
-        }
+    heldSignals.clear();
+    if (speed > 0) {
+      // With two trains, a large catch-up tick could step them through each
+      // other between crash checks: slice to at most half a cell per slice.
+      var slices = 1;
+      if (trains.length > 1) {
+        slices = (dt * tilesPerSecond * speed * 2).ceil().clamp(1, 240);
       }
-      if (paidOut) _save();
+      final sdt = dt / slices;
+      for (var i = 0; i < slices; i++) {
+        for (final tr in trains) {
+          _advance(tr, sdt);
+        }
+        _detectCrash();
+        if (trains.length > 1 && trains.every((t) => t.wrecked)) break;
+      }
       dirty = true;
     }
     if (dirty) notifyListeners();
@@ -1325,6 +1506,10 @@ class Game extends ChangeNotifier {
             'a2': s.branchB.index,
             'u': s.useB,
           },
+      ],
+      'signals': [for (final c in signals) c.toString()],
+      'trains': [
+        for (final t in trains) {'cars': t.cars, 'rev': t.reversed},
       ],
       'cols': cols,
       'rows': rows,
@@ -1466,7 +1651,19 @@ class Game extends ChangeNotifier {
       // Saves from before trees were map-owned get a fresh scatter.
       if (data['trees'] == null) _scatterTrees((cols * rows) ~/ 24);
       balance = data['balance'] as int;
-      cars = data['cars'] as int;
+      signals.clear();
+      for (final c in (data['signals'] as List? ?? [])) {
+        signals.add(Cell.parse(c as String));
+      }
+      trains
+        ..clear()
+        ..addAll([
+          for (final t in (data['trains'] as List? ?? []))
+            Train(cars: t['cars'] as int, reversed: t['rev'] as bool),
+        ]);
+      if (trains.isEmpty) {
+        trains.add(Train(cars: data['cars'] as int, reversed: false));
+      }
       for (final b in buildings) {
         b.trigger = _adjacentTrack(b.cell);
       }

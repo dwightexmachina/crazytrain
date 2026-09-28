@@ -805,62 +805,99 @@ class DynamicPainter extends CustomPainter {
       actors.add((px, py));
       items.add((v.depthKey(px, py), () => drawCow(c, v, px, py, z)));
     }
-    final path = game.renderPath;
-    final len = (path ?? const <PathStep>[]).length.toDouble();
-    final vehicles = <(double, bool)>[]; // (s, isEngine)
-    if (path != null) {
-      vehicles.add((game.s, true));
-      for (var i = 0; i < game.cars; i++) {
-        var cs = game.s - 0.85 * (i + 1);
+    for (final (ti, tr) in game.trains.indexed) {
+      final path = tr.renderPath;
+      if (path == null || path.isEmpty) continue;
+      final len = path.length.toDouble();
+      final engineCols = ti == 0 ? Pal.engine : Pal.engine2;
+      final cabCols = ti == 0 ? Pal.cab : Pal.cab2;
+      final carCols = ti == 0 ? Pal.car : Pal.car2;
+      final vehicles = <(double, bool)>[(tr.s, true)]; // (s, isEngine)
+      for (var i = 0; i < tr.cars; i++) {
+        var cs = tr.s - 0.85 * (i + 1);
         while (cs < 0) {
           cs += len;
         }
         vehicles.add((cs, false));
       }
-    }
-    // Compute plane position + heading for each, then depth sort.
-    for (final (sPos, isEngine) in vehicles) {
-      final path = game.renderPath!;
-      final idx = sPos.floor() % path.length;
-      final t = sPos - sPos.floorToDouble();
-      final st = path[idx];
-      if (st.tunnelTo != null) continue; // underground: unseen till it's out
-      final local = st.posInCell(t, 1.0);
-      final px = st.cell.x + local.dx, py = st.cell.y + local.dy;
-      final heading = st.headingAt(t, 1.0);
-      // Ground level under this vehicle; airborne steps lerp pad-to-pad
-      // and add the launch arc on top.
-      double groundZ;
-      final fly = st.flyTo;
-      if (fly != null) {
-        double padZ(Cell cell) =>
-            game.deck[cell]?.toDouble() ?? hf.centerZ(cell);
-        final za = padZ(st.cell), zb = padZ(fly);
-        groundZ = (za + (zb - za) * t) * kZStep;
-      } else {
-        // Rail height interpolates entry-edge to exit-edge: hills for real.
-        final za = game.railEdgeZ(st.cell, st.entry);
-        final zb = game.railEdgeZ(st.cell, st.exit);
-        groundZ = (za + (zb - za) * t) * kZStep;
-      }
-      final z = groundZ + st.flightZ(t);
-      final horiz = math.cos(heading).abs() > math.sin(heading).abs();
-      final w = horiz ? 0.68 : 0.34, d = horiz ? 0.34 : 0.68;
-      actors.add((px, py));
-      items.add((v.depthKey(px, py), () {
-        drawShadow(c, v, px, py, st.flyTo != null ? 0.2 : 0.3, groundZ);
-        if (isEngine) {
-          drawBox(c, v, px, py, w, d, 0.3, Pal.engine, 0.04 + z);
-          // Cab at the rear, stack at the front (visual only).
-          final back = Offset.fromDirection(heading, -0.16);
-          final front = Offset.fromDirection(heading, 0.2);
-          drawBox(c, v, px + back.dx, py + back.dy, horiz ? 0.3 : 0.3,
-              horiz ? 0.3 : 0.3, 0.2, Pal.cab, 0.34 + z);
-          drawBox(c, v, px + front.dx, py + front.dy, 0.1, 0.1, 0.16,
-              Pal.stack, 0.34 + z);
+      // Compute plane position + heading for each, then depth sort.
+      for (final (sPos, isEngine) in vehicles) {
+        final idx = sPos.floor() % path.length;
+        final t = sPos - sPos.floorToDouble();
+        final st = path[idx];
+        if (st.tunnelTo != null) continue; // underground: unseen till out
+        final local = st.posInCell(t, 1.0);
+        final px = st.cell.x + local.dx, py = st.cell.y + local.dy;
+        final heading = st.headingAt(t, 1.0);
+        // Ground level under this vehicle; airborne steps lerp pad-to-pad
+        // and add the launch arc on top.
+        double groundZ;
+        final fly = st.flyTo;
+        if (fly != null) {
+          double padZ(Cell cell) =>
+              game.deck[cell]?.toDouble() ?? hf.centerZ(cell);
+          final za = padZ(st.cell), zb = padZ(fly);
+          groundZ = (za + (zb - za) * t) * kZStep;
         } else {
-          drawBox(c, v, px, py, w * 0.94, d * 0.94, 0.26, Pal.car, 0.04 + z);
+          // Rail height interpolates entry-edge to exit-edge.
+          final za = game.railEdgeZ(st.cell, st.entry);
+          final zb = game.railEdgeZ(st.cell, st.exit);
+          groundZ = (za + (zb - za) * t) * kZStep;
         }
+        final z = groundZ + st.flightZ(t);
+        final horiz = math.cos(heading).abs() > math.sin(heading).abs();
+        final w = horiz ? 0.68 : 0.34, d = horiz ? 0.34 : 0.68;
+        actors.add((px, py));
+        items.add((v.depthKey(px, py), () {
+          drawShadow(c, v, px, py, st.flyTo != null ? 0.2 : 0.3, groundZ);
+          if (isEngine) {
+            drawBox(c, v, px, py, w, d, 0.3, engineCols, 0.04 + z);
+            // Cab at the rear, stack at the front (visual only).
+            final back = Offset.fromDirection(heading, -0.16);
+            final front = Offset.fromDirection(heading, 0.2);
+            drawBox(c, v, px + back.dx, py + back.dy, horiz ? 0.3 : 0.3,
+                horiz ? 0.3 : 0.3, 0.2, cabCols, 0.34 + z);
+            drawBox(c, v, px + front.dx, py + front.dy, 0.1, 0.1, 0.16,
+                Pal.stack, 0.34 + z);
+            if (tr.wrecked) {
+              final m = v.pt(px, py, z + 1.0);
+              final paint = Paint()
+                ..color = Pal.bad
+                ..strokeWidth = 3
+                ..strokeCap = StrokeCap.round;
+              c.drawLine(
+                  m + const Offset(-7, -7), m + const Offset(7, 7), paint);
+              c.drawLine(
+                  m + const Offset(-7, 7), m + const Offset(7, -7), paint);
+            }
+          } else {
+            drawBox(c, v, px, py, w * 0.94, d * 0.94, 0.26, carCols, 0.04 + z);
+          }
+        }));
+      }
+    }
+
+    // Block signals: a mast with a lamp — red while it's holding a train.
+    for (final sc in game.signals) {
+      final zBase = (game.deck[sc]?.toDouble() ?? hf.centerZ(sc)) * kZStep;
+      final px = sc.x + 0.82, py = sc.y + 0.82;
+      items.add((v.depthKey(px, py), () {
+        drawBox(c, v, px, py, 0.07, 0.07, 0.42, Pal.stack, zBase);
+        final lamp = v.pt(px, py, zBase + 0.5);
+        c.drawCircle(
+            lamp,
+            0.055 * v.s,
+            Paint()
+              ..color = game.heldSignals.contains(sc)
+                  ? Pal.signalStop
+                  : Pal.signalGo);
+        c.drawCircle(
+            lamp,
+            0.055 * v.s,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.4
+              ..color = Colors.white);
       }));
     }
     // The dynamic layer always composites over the static one, so any tree

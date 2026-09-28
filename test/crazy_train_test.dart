@@ -747,6 +747,75 @@ void main() {
     });
   });
 
+  group('second train & signals', () {
+    test('second train traces the loop in reverse and both trains pay', () {
+      final g = flatGame();
+      g.balance = 5000;
+      g.cows.clear();
+      expect(g.buySecondTrain(), isTrue);
+      expect(g.trains.length, 2);
+      final t1 = g.trains[0], t2 = g.trains[1];
+      expect(t2.path, isNotNull);
+      // Same circuit, opposite direction: step 0's exits disagree.
+      expect(t1.path!.first.exit, isNot(t2.path!.first.exit));
+      expect(t2.s, t2.path!.length / 2); // spawns across the loop
+      g.speed = 1;
+      g.tick(28 / Game.tilesPerSecond + 0.2); // one full lap for both
+      // Opposite trains on a plain loop must meet head-on and crash.
+      expect(g.trains.every((t) => t.wrecked), isTrue);
+      // Tap the wreck: pays the crane, re-rails, separates.
+      final wreckCell = g.occupiedBy(t1).first;
+      final bal = g.balance;
+      expect(g.tapWreck(wreckCell), isNull);
+      expect(g.balance, bal - Game.priceRerail);
+      expect(g.trains.any((t) => t.wrecked), isFalse);
+    });
+
+    test('a signal holds a train while the block ahead is occupied', () {
+      final g = flatGame();
+      g.balance = 5000;
+      g.cows.clear();
+      g.speed = 1;
+      // Park a phantom second train ahead on the loop, then signal the
+      // boundary: train 1 must stop at the red instead of rear-ending it.
+      g.buySecondTrain();
+      final t1 = g.trains[0], t2 = g.trains[1];
+      t2.wrecked = true; // hold it still as the obstacle
+      final p1 = t1.path!;
+      // Choose a signal three steps ahead of train 1; park t2 just beyond.
+      final sigCell = p1[3].cell;
+      g.signals.add(sigCell);
+      // Park the obstacle inside the signal's block, on train 1's frame.
+      t2.lastPath = p1;
+      t2.path = p1;
+      t2.s = 5.0;
+      g.tick(10); // plenty of time to reach the signal
+      expect(t1.s, lessThan(3.0)); // held before entering the signal cell
+      expect(g.heldSignals.contains(sigCell), isTrue);
+      expect(t1.wrecked, isFalse);
+      // Clear the block: the obstacle vanishes, the train proceeds.
+      g.trains.removeLast();
+      g.tick(2);
+      expect(t1.s, greaterThan(3.0));
+    });
+
+    test('signals toggle on track only and persist', () {
+      final g = flatGame();
+      g.balance = 1000;
+      expect(g.tapSignal(const Cell(1, 1)), 'Signals sit on track');
+      final trackCell = g.board.keys.first;
+      expect(g.tapSignal(trackCell), isNull);
+      expect(g.signals.contains(trackCell), isTrue);
+      final g2 = Game();
+      expect(g2.signals.contains(trackCell), isTrue);
+      expect(g2.trains.length, 1);
+      // Removing refunds half.
+      final bal = g.balance;
+      expect(g.tapSignal(trackCell), isNull);
+      expect(g.balance, bal + Game.priceSignal ~/ 2);
+    });
+  });
+
   group('camera', () {
     test('cellAt round-trips cell centers under every rotation', () {
       final g = flatGame();

@@ -165,6 +165,8 @@ class _BoardViewState extends State<BoardView>
         _maybeNotice(game.tapSwitch(c));
       case Tool.tunnel:
         _maybeNotice(game.tapTunnel(c));
+      case Tool.signal:
+        _maybeNotice(game.tapSignal(c));
       case Tool.stop ||
             Tool.depot ||
             Tool.raiseLand ||
@@ -205,6 +207,7 @@ class _BoardViewState extends State<BoardView>
             Tool.launchpad ||
             Tool.switchTrack ||
             Tool.tunnel ||
+            Tool.signal ||
             Tool.none:
         break;
     }
@@ -260,7 +263,10 @@ class _BoardViewState extends State<BoardView>
         final down = _downPos;
         if (down != null && (local - down).distance < 14) {
           final cell = _cellAt(down);
-          if (cell != null) game.toggleSwitch(cell);
+          if (cell != null) {
+            game.toggleSwitch(cell);
+            _maybeNotice(game.tapWreck(cell));
+          }
         }
       case Tool.bulldoze ||
             Tool.raiseLand ||
@@ -268,7 +274,8 @@ class _BoardViewState extends State<BoardView>
             Tool.levelLand ||
             Tool.launchpad ||
             Tool.switchTrack ||
-            Tool.tunnel:
+            Tool.tunnel ||
+            Tool.signal:
         break;
     }
     _downPos = null;
