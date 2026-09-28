@@ -613,6 +613,19 @@ void main() {
   });
 
   group('tool selection', () {
+    testWidgets('splash shows on boot and a tap rolls into the game',
+        (tester) async {
+      web.window.localStorage.clear();
+      await tester.pumpWidget(const TrainMakerApp());
+      await tester.pump();
+      expect(find.text('CRAZY TRAIN'), findsWidgets); // wordmark layers
+      await tester.tap(find.text('TAP TO ROLL'));
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 60)); // fade out
+      }
+      expect(find.text('TAP TO ROLL'), findsNothing);
+    });
+
     testWidgets('Esc deselects the active tool', (tester) async {
       web.window.localStorage.clear();
       await tester.pumpWidget(const TrainMakerApp());

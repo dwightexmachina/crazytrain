@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'audio/riff.dart';
 import 'model/game.dart';
 import 'ui/board_view.dart';
 import 'ui/palette.dart';
 import 'ui/panel.dart';
+import 'ui/splash_screen.dart';
 
 void main() {
   runApp(const TrainMakerApp());
@@ -19,6 +21,7 @@ class TrainMakerApp extends StatefulWidget {
 
 class _TrainMakerAppState extends State<TrainMakerApp> {
   final Game game = Game();
+  bool _splash = true;
 
   @override
   Widget build(BuildContext context) {
@@ -41,18 +44,30 @@ class _TrainMakerAppState extends State<TrainMakerApp> {
         child: Focus(
           autofocus: true,
           child: Scaffold(
-            body: Column(
+            body: Stack(
+              fit: StackFit.expand,
               children: [
-                TopBar(game: game),
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(child: BoardView(game: game)),
-                      ShopPanel(game: game),
-                    ],
-                  ),
+                Column(
+                  children: [
+                    TopBar(game: game),
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: BoardView(game: game)),
+                          ShopPanel(game: game),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
+                if (_splash)
+                  SplashScreen(
+                    onDismiss: () {
+                      setState(() => _splash = false);
+                      Riff.play(); // the dismissal tap unlocked audio
+                    },
+                  ),
               ],
             ),
           ),
