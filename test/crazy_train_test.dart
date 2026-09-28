@@ -285,6 +285,23 @@ void main() {
       expect(flight.single.flightZ(0), 0);
     });
 
+    test('site validators drive placement tints', () {
+      final g = flatGame();
+      g.balance = 1000;
+      // Building: needs dry, clear ground beside track.
+      expect(g.buildingSiteError(const Cell(7, 2)), isNull); // beside loop
+      expect(g.buildingSiteError(const Cell(1, 1)), 'Must touch track');
+      expect(g.buildingSiteError(g.board.keys.first), 'Cell occupied');
+      // Pad: clear flat ground anywhere.
+      expect(g.padSiteError(const Cell(1, 1)), isNull);
+      expect(g.padSiteError(g.board.keys.first), 'Remove the track first');
+      sink(g, const Cell(1, 8));
+      expect(g.padSiteError(const Cell(1, 8)), "Can't float on water");
+      // Portal: same idea.
+      expect(g.portalSiteError(const Cell(9, 1)), isNull);
+      expect(g.portalSiteError(const Cell(1, 8)), "Can't bore from water");
+    });
+
     test('two-tap placement links a pair and charges once', () {
       final g = flatGame();
       g.balance = 1000;

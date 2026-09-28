@@ -662,17 +662,31 @@ class DynamicPainter extends CustomPainter {
     final v = IsoView.of(size, game, zoom.value, pan.value, rot: rot.value);
     final hf = game.heights;
 
+    List<Offset> cellQuad(Cell q) {
+      final (a, b, d, e) = hf.corners(q);
+      return [
+        v.pt(q.x.toDouble(), q.y.toDouble(), a * kZStep),
+        v.pt(q.x + 1.0, q.y.toDouble(), b * kZStep),
+        v.pt(q.x + 1.0, q.y + 1.0, d * kZStep),
+        v.pt(q.x.toDouble(), q.y + 1.0, e * kZStep),
+      ];
+    }
+
     // Hover cell highlight (build tools only), draped over the terrain.
+    // Placement tools tint by validity: green would take, red would refuse.
     final h = hover.value;
     if (h != null && game.tool != Tool.none) {
-      final color = game.tool == Tool.bulldoze ? Pal.ghostBad : Pal.hover;
-      final (a, b, d, e) = hf.corners(h);
-      _face(c, color, [
-        v.pt(h.x.toDouble(), h.y.toDouble(), a * kZStep),
-        v.pt(h.x + 1.0, h.y.toDouble(), b * kZStep),
-        v.pt(h.x + 1.0, h.y + 1.0, d * kZStep),
-        v.pt(h.x.toDouble(), h.y + 1.0, e * kZStep),
-      ]);
+      final color = switch (game.tool) {
+        Tool.bulldoze => Pal.ghostBad,
+        Tool.stop || Tool.depot =>
+          game.buildingSiteError(h) == null ? Pal.ghostOk : Pal.ghostBad,
+        Tool.launchpad =>
+          game.padSiteError(h) == null ? Pal.ghostOk : Pal.ghostBad,
+        Tool.tunnel when game.pendingTunnel == null =>
+          game.portalSiteError(h) == null ? Pal.ghostOk : Pal.ghostBad,
+        _ => Pal.hover,
+      };
+      _face(c, color, cellQuad(h));
     }
 
     // Drag ghost. Bridges preview at deck grade, straights at their slope.
@@ -700,16 +714,6 @@ class DynamicPainter extends CustomPainter {
     if (pending != null) {
       drawLaunchpad(c, v, pending,
           opacity: 0.55, z: hf.centerZ(pending) * kZStep);
-    }
-
-    List<Offset> cellQuad(Cell q) {
-      final (a, b, d, e) = hf.corners(q);
-      return [
-        v.pt(q.x.toDouble(), q.y.toDouble(), a * kZStep),
-        v.pt(q.x + 1.0, q.y.toDouble(), b * kZStep),
-        v.pt(q.x + 1.0, q.y + 1.0, d * kZStep),
-        v.pt(q.x.toDouble(), q.y + 1.0, e * kZStep),
-      ];
     }
 
     // Boring a tunnel: faint guides along the armed portal's row and
@@ -745,6 +749,47 @@ class DynamicPainter extends CustomPainter {
       if (ps == null) continue;
       _face(c, Pal.ghostOk, cellQuad(ps));
     }
+
+    // Switch side picker: with a piece armed, its free sides (valid base
+    // taps) glow green; its connected legs tint red.
+    final armed = game.pendingSwitch;
+    if (armed != null) {
+      final piece = game.board[armed];
+      if (piece != null) {
+        for (final d in Dir.values) {
+          final n = armed.step(d);
+          if (n.x < 0 || n.x >= game.cols || n.y < 0 || n.y >= game.rows) {
+            continue;
+          }
+          _face(c, piece.conn.contains(d) ? Pal.ghostBad : Pal.ghostOk,
+              cellQuad(n));
+        }
+      }
+    }
+
+    // Launchpad landing hint: track entering a pad heading d exits its
+    // partner still heading d — highlight the far-side cell where rail
+    // must continue, whenever that connection is missing.
+    final effBoard = {
+      ...game.board,
+      for (final p in pl?.pieces ?? const <Planned>[]) p.cell: p.kind,
+    };
+    game.launchpads.forEach((padA, padB) {
+      for (final d in Dir.values) {
+        final feeder = effBoard[padA.step(d.opposite)];
+        if (feeder == null || !feeder.conn.contains(d)) continue;
+        final exitCell = padB.step(d);
+        if (exitCell.x < 0 ||
+            exitCell.x >= game.cols ||
+            exitCell.y < 0 ||
+            exitCell.y >= game.rows) {
+          continue;
+        }
+        final landing = effBoard[exitCell];
+        if (landing != null && landing.conn.contains(d.opposite)) continue;
+        _face(c, Pal.ghostOk, cellQuad(exitCell));
+      }
+    });
 
     _drawTrain(c, v);
     _drawToasts(c, v, size);

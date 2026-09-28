@@ -648,7 +648,9 @@ class Game extends ChangeNotifier {
         (c.x, c.y), (c.x + 1, c.y), (c.x + 1, c.y + 1), (c.x, c.y + 1),
       ];
 
-  String? placeBuilding(BuildingType type, Cell c) {
+  /// Why [c] can't take a building (ignoring money and the auto-flatten,
+  /// which is attempted on placement); drives the hover tint.
+  String? buildingSiteError(Cell c) {
     if (!inBounds(c)) return 'Out of bounds';
     if (isWater(c)) return "Can't build on water";
     if (board.containsKey(c) ||
@@ -658,8 +660,14 @@ class Game extends ChangeNotifier {
         switches.containsKey(c)) {
       return 'Cell occupied';
     }
-    final trigger = _adjacentTrack(c);
-    if (trigger == null) return 'Must touch track';
+    if (_adjacentTrack(c) == null) return 'Must touch track';
+    return null;
+  }
+
+  String? placeBuilding(BuildingType type, Cell c) {
+    final site = buildingSiteError(c);
+    if (site != null) return site;
+    final trigger = _adjacentTrack(c)!;
     // Auto-flatten an uneven site, priced like the terraform tools. All or
     // nothing: if any corner can't reach the target, restore and refuse.
     var flatCost = 0;
@@ -903,6 +911,20 @@ class Game extends ChangeNotifier {
 
   // ------------------------------------------------------------ launchpads
 
+  /// Why [c] can't host a launchpad, or null when it can. Also drives the
+  /// hover tint while the tool is active.
+  String? padSiteError(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (launchpads.containsKey(c)) return 'Already a launchpad';
+    if (board.containsKey(c) || switches.containsKey(c)) {
+      return 'Remove the track first';
+    }
+    if (_cellBlocked(c) || tunnels.containsKey(c)) return 'Cell occupied';
+    if (isWater(c)) return "Can't float on water";
+    if (!heights.isFlat(c)) return 'Needs flat ground';
+    return null;
+  }
+
   /// Two-tap placement: first tap arms a pad, second tap links the pair.
   /// Tapping the armed pad again cancels it. Returns an error, or null.
   String? tapLaunchpad(Cell c) {
@@ -912,13 +934,8 @@ class Game extends ChangeNotifier {
       notifyListeners();
       return null;
     }
-    if (launchpads.containsKey(c)) return 'Already a launchpad';
-    if (board.containsKey(c) || switches.containsKey(c)) {
-      return 'Remove the track first';
-    }
-    if (_cellBlocked(c) || tunnels.containsKey(c)) return 'Cell occupied';
-    if (isWater(c)) return "Can't float on water";
-    if (!heights.isFlat(c)) return 'Needs flat ground';
+    final site = padSiteError(c);
+    if (site != null) return site;
     if (balance < priceLaunchpad) return 'Not enough money';
     final first = pendingPad;
     if (first == null) {
@@ -954,7 +971,8 @@ class Game extends ChangeNotifier {
     return true;
   }
 
-  String? _portalSiteError(Cell c) {
+  /// Why [c] can't host a tunnel portal; drives the hover tint too.
+  String? portalSiteError(Cell c) {
     if (tunnels.containsKey(c)) return 'Already a tunnel portal';
     if (board.containsKey(c) || switches.containsKey(c)) {
       return 'Remove the track first';
@@ -968,7 +986,7 @@ class Game extends ChangeNotifier {
   /// Why a bore from [from] to [to] is impossible, or null when it's valid.
   /// Drives both placement and the live preview line.
   String? boreError(Cell from, Cell to) {
-    final site = _portalSiteError(to);
+    final site = portalSiteError(to);
     if (site != null) return site;
     if (axisDir(from, to) == null) return 'Portals must line up';
     final dist = (to.x - from.x).abs() + (to.y - from.y).abs();
@@ -992,7 +1010,7 @@ class Game extends ChangeNotifier {
     }
     if (balance < priceTunnel) return 'Not enough money';
     if (first == null) {
-      final site = _portalSiteError(c);
+      final site = portalSiteError(c);
       if (site != null) return site;
       pendingTunnel = c;
       notifyListeners();
