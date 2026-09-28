@@ -1,0 +1,307 @@
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+
+import '../model/game.dart';
+import '../model/track.dart';
+import 'painters.dart';
+
+/// The isometric board: static cached layer + dynamic layer, plus all
+/// pointer handling (drag-to-lay track, tap-place buildings, bulldoze).
+class BoardView extends StatefulWidget {
+  final Game game;
+  const BoardView({super.key, required this.game});
+
+  @override
+  State<BoardView> createState() => _BoardViewState();
+}
+
+class _BoardViewState extends State<BoardView>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
+  final Stopwatch _clock = Stopwatch();
+
+  final List<Cell> _dragCells = [];
+  final ValueNotifier<TrackPlan?> _plan = ValueNotifier(null);
+  final ValueNotifier<Cell?> _hover = ValueNotifier(null);
+
+  // Camera: whole-board fit at zoom 1, scroll to zoom, drag (no tool) to pan.
+  final ValueNotifier<double> _zoom = ValueNotifier(1);
+  final ValueNotifier<Offset> _pan = ValueNotifier(Offset.zero);
+  bool _panning = false;
+  Offset? _lastPanPos;
+
+  Game get game => widget.game;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_onTick)..start();
+  }
+
+  void _onTick(Duration now) {
+    // Wall-clock dt: in a throttled/background tab frames arrive rarely, and
+    // the railway should keep earning across the gap (capped at one minute).
+    final dt = _clock.elapsedMicroseconds / 1e6;
+    _clock
+      ..reset()
+      ..start();
+    game.tick(dt.clamp(0.0, 60.0));
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _plan.dispose();
+    _hover.dispose();
+    _zoom.dispose();
+    _pan.dispose();
+    super.dispose();
+  }
+
+  // ------------------------------------------------------------ pointer
+  //
+  // Raw pointer events (not GestureDetector): pan recognizers eat the drag
+  // slop, so a fast drag's first cell would be skipped.
+
+  Offset? _downPos;
+  bool _pointerActive = false;
+
+  IsoView _view(Size size) =>
+      IsoView.of(size, game, _zoom.value, _pan.value);
+
+  // Last sculpted vertex, so drag-sculpting fires once per vertex.
+  (int, int)? _lastSculpt;
+
+  String? _sculpt(Offset local, int delta, {bool force = false}) {
+    final view = _view(context.size!);
+    final c = view.cellAt(local);
+    if (c == null) return null;
+    final frac = view.fracIn(c, local);
+    final vert = (c.x + (frac.dx > 0.5 ? 1 : 0), c.y + (frac.dy > 0.5 ? 1 : 0));
+    if (!force && vert == _lastSculpt) return null;
+    _lastSculpt = vert;
+    return game.sculpt(c, frac, delta);
+  }
+
+  Cell? _cellAt(Offset local) => _view(context.size!).cellAt(local);
+
+  Offset _clampPan(Offset p) {
+    // Fully zoomed out the whole board is visible — nothing to pan; the
+    // reachable range grows with zoom.
+    final size = context.size!;
+    final limX = size.width * 0.65 * (_zoom.value - 1);
+    final limY = size.height * 0.65 * (_zoom.value - 1);
+    return Offset(p.dx.clamp(-limX, limX), p.dy.clamp(-limY, limY));
+  }
+
+  void _onScroll(PointerScrollEvent e) {
+    final size = context.size!;
+    final oldZoom = _zoom.value;
+    final newZoom =
+        (oldZoom * math.exp(-e.scrollDelta.dy / 400)).clamp(1.0, 4.0);
+    if (newZoom == oldZoom) return;
+    // Keep the plane point under the cursor fixed while zooming.
+    final base = IsoView.fit(size, game);
+    final center = Offset(size.width, size.height) / 2;
+    final cursor = e.localPosition;
+    final oldO = center + (base.o - center) * oldZoom + _pan.value;
+    final planePx = (cursor - oldO) / (base.s * oldZoom); // iso px per s=1
+    var pan =
+        cursor - center - (base.o - center) * newZoom - planePx * (base.s * newZoom);
+    if (newZoom <= 1.001) pan = Offset.zero; // fully zoomed out: recenter
+    _zoom.value = newZoom;
+    _pan.value = _clampPan(pan);
+    _hover.value = _cellAt(cursor);
+  }
+
+  void _pointerDown(Offset local) {
+    _pointerActive = true;
+    _downPos = local;
+    if (game.tool == Tool.none) {
+      _panning = true;
+      _lastPanPos = local;
+      return;
+    }
+    if (game.tool == Tool.raiseLand || game.tool == Tool.lowerLand) {
+      _maybeNotice(
+          _sculpt(local, game.tool == Tool.raiseLand ? 1 : -1, force: true));
+      return;
+    }
+    final c = _cellAt(local);
+    if (c == null) return;
+    switch (game.tool) {
+      case Tool.track:
+        _dragCells
+          ..clear()
+          ..add(c);
+        _plan.value = game.planTrack(_dragCells);
+      case Tool.bulldoze:
+        game.bulldoze(c);
+      case Tool.launchpad:
+        _maybeNotice(game.tapLaunchpad(c));
+      case Tool.switchTrack:
+        _maybeNotice(game.tapSwitch(c));
+      case Tool.stop ||
+            Tool.depot ||
+            Tool.raiseLand ||
+            Tool.lowerLand ||
+            Tool.none:
+        break;
+    }
+  }
+
+  void _pointerMove(Offset local) {
+    if (!_pointerActive) return;
+    if (_panning) {
+      _pan.value = _clampPan(_pan.value + (local - _lastPanPos!));
+      _lastPanPos = local;
+      return;
+    }
+    final c = _cellAt(local);
+    _hover.value = c;
+    if (c == null) return;
+    // Drag-painting tools: apply silently, skipping cells that reject.
+    switch (game.tool) {
+      case Tool.bulldoze:
+        game.bulldoze(c);
+        return;
+      case Tool.raiseLand:
+        _sculpt(local, 1);
+        return;
+      case Tool.lowerLand:
+        _sculpt(local, -1);
+        return;
+      case Tool.track ||
+            Tool.stop ||
+            Tool.depot ||
+            Tool.launchpad ||
+            Tool.switchTrack ||
+            Tool.none:
+        break;
+    }
+    if (game.tool != Tool.track || _dragCells.isEmpty) return;
+    if (c == _dragCells.last) return;
+    // Backtrack: pointer returned to the previous cell.
+    if (_dragCells.length >= 2 && c == _dragCells[_dragCells.length - 2]) {
+      _dragCells.removeLast();
+    } else {
+      // Manhattan-fill any gap from fast pointer movement (x first, then y).
+      var cur = _dragCells.last;
+      while (cur.x != c.x) {
+        cur = Cell(cur.x + (c.x > cur.x ? 1 : -1), cur.y);
+        _dragCells.add(cur);
+      }
+      while (cur.y != c.y) {
+        cur = Cell(cur.x, cur.y + (c.y > cur.y ? 1 : -1));
+        _dragCells.add(cur);
+      }
+    }
+    _plan.value = game.planTrack(_dragCells);
+  }
+
+  void _pointerUp(Offset local) {
+    if (!_pointerActive) return;
+    _pointerActive = false;
+    _panning = false;
+    _lastPanPos = null;
+    _lastSculpt = null;
+    final plan = _plan.value;
+    _dragCells.clear();
+    _plan.value = null;
+    switch (game.tool) {
+      case Tool.track:
+        if (plan != null && !plan.isEmpty) {
+          game.commitTrack(plan);
+          if (plan.truncatedByFunds) {
+            _notice('Ran out of money — track laid up to what you could afford.');
+          }
+        }
+      case Tool.stop || Tool.depot:
+        // Buildings place on tap: ignore if the pointer travelled far.
+        final down = _downPos;
+        if (down != null && (local - down).distance < 14) {
+          final c = _cellAt(down);
+          if (c != null) {
+            _place(game.tool == Tool.stop ? BuildingType.stop : BuildingType.depot, c);
+          }
+        }
+      case Tool.none:
+        // A pan that never moved is a tap: flip a switch under it.
+        final down = _downPos;
+        if (down != null && (local - down).distance < 14) {
+          final cell = _cellAt(down);
+          if (cell != null) game.toggleSwitch(cell);
+        }
+      case Tool.bulldoze ||
+            Tool.raiseLand ||
+            Tool.lowerLand ||
+            Tool.launchpad ||
+            Tool.switchTrack:
+        break;
+    }
+    _downPos = null;
+  }
+
+  void _place(BuildingType type, Cell c) {
+    _maybeNotice(game.placeBuilding(type, c));
+  }
+
+  void _maybeNotice(String? err) {
+    if (err != null) _notice(err);
+  }
+
+  void _notice(String msg) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        width: 340,
+        duration: const Duration(seconds: 2),
+      ));
+  }
+
+  // ------------------------------------------------------------ build
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onHover: (e) => _hover.value = _cellAt(e.localPosition),
+      onExit: (_) => _hover.value = null,
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (e) => _pointerDown(e.localPosition),
+        onPointerMove: (e) => _pointerMove(e.localPosition),
+        onPointerUp: (e) => _pointerUp(e.localPosition),
+        onPointerCancel: (e) => _pointerUp(e.position),
+        onPointerSignal: (e) {
+          if (e is PointerScrollEvent) _onScroll(e);
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            RepaintBoundary(
+              child: ListenableBuilder(
+                listenable: Listenable.merge([game, _zoom, _pan]),
+                builder: (context, child) => CustomPaint(
+                  painter: StaticBoardPainter(game, _zoom.value, _pan.value),
+                  isComplex: true,
+                  willChange: false,
+                ),
+              ),
+            ),
+            RepaintBoundary(
+              child: CustomPaint(
+                painter: DynamicPainter(game, _plan, _hover, _zoom, _pan),
+                willChange: true,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

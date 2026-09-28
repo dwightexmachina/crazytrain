@@ -1,0 +1,1005 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+import 'package:web/web.dart' as web;
+
+import 'dart:ui' show Offset;
+
+import '../audio/horn.dart';
+import 'heightfield.dart';
+import 'track.dart';
+
+export 'heightfield.dart';
+
+enum BuildingType {
+  station('Station', 0, 0), // the main terminus: pays the lap formula
+  stop('Station stop', 200, 10),
+  depot('Cargo depot', 350, 6);
+
+  final String label;
+  final int price;
+  final int bonus; // per pass of the adjacent track cell
+  const BuildingType(this.label, this.price, this.bonus);
+}
+
+class Building {
+  final Cell cell;
+  final BuildingType type;
+  Cell? trigger; // adjacent track cell that fires the bonus / payout
+  Building(this.cell, this.type, [this.trigger]);
+}
+
+class Cow {
+  Cell cell;
+  double moveIn;
+  Cow(this.cell, this.moveIn);
+}
+
+enum Tool {
+  none,
+  track,
+  stop,
+  depot,
+  bulldoze,
+  raiseLand,
+  lowerLand,
+  launchpad,
+  switchTrack,
+}
+
+class Toast {
+  final double px, py; // plane coords
+  final String text;
+  final bool big;
+  double age = 0;
+  Toast(this.px, this.py, this.text, {this.big = false});
+}
+
+/// One planned placement of a drag (or a building preview).
+class Planned {
+  final Cell cell;
+  final TrackKind kind;
+  final int cost; // 0 if identical track already there
+  final bool bridge;
+  final int? deckLevel; // bridge deck height over wet ground
+  const Planned(this.cell, this.kind, this.cost,
+      {this.bridge = false, this.deckLevel});
+}
+
+class TrackPlan {
+  final List<Planned> pieces;
+  final int cost;
+  final bool truncatedByFunds;
+  const TrackPlan(this.pieces, this.cost, this.truncatedByFunds);
+  bool get isEmpty => pieces.isEmpty;
+}
+
+class Game extends ChangeNotifier {
+  static const int startCols = 16, startRows = 12;
+  static const int maxCols = 32, maxRows = 24;
+  static const int expandStep = 4; // cells added per land deed
+  static const int priceStraight = 10, priceCurve = 15, priceCar = 120;
+  static const int priceBridge = 25; // surcharge for track over water
+  static const int priceTerraformStep = 10; // per vertex-height-step moved
+  static const int priceLaunchpad = 300; // per linked pair of pads
+  static const int priceSwitch = 500; // converts a track piece to a turnout
+  static const double tilesPerSecond = 2.2;
+
+  final Map<Cell, TrackKind> board = {};
+  final List<Building> buildings = [];
+  final HeightField heights = HeightField(startCols, startRows);
+
+  /// Bridge decks: rail crossing wet ground rides at this height (the bank
+  /// grade it was built from) rather than on the submerged terrain.
+  final Map<Cell, int> deck = {};
+
+  /// Launchpad cell -> its partner; every pair is stored in both directions.
+  final Map<Cell, Cell> launchpads = {};
+  Cell? pendingPad; // first pad of a pair being placed
+  final Map<Cell, TrackSwitch> switches = {};
+  Cell? pendingSwitch; // armed track piece awaiting its base-side tap
+  final List<Cow> cows = [];
+  int cols = startCols, rows = startRows;
+  int deeds = 0; // land deeds bought; each one raises the next deed's price
+  int balance = 80;
+  int cars = 1;
+  int speed = 1; // 0 = paused, 1, 2
+  Tool tool = Tool.none;
+  bool cowBlocked = false;
+
+  final math.Random _rng = math.Random();
+
+  /// Bumped whenever track/buildings/terrain change; the static board layer
+  /// only re-rasterizes when this changes.
+  int structureRev = 0;
+
+  List<PathStep>? path; // null = broken loop
+  List<PathStep>? _lastPath; // last good loop, so a halted train stays visible
+  List<PathStep>? get renderPath => path ?? _lastPath;
+  double s = 0; // engine position along path, in tiles
+  int lapBonus = 0;
+  final List<Toast> toasts = [];
+
+  Building get station => buildings.first;
+  int get trackLength => path?.length ?? 0;
+  int get projectedPayout =>
+      trackLength == 0 ? 0 : cars * trackLength + _projectedBonuses();
+
+  int _projectedBonuses() {
+    var sum = 0;
+    for (final b in buildings) {
+      if (b.type.bonus > 0 && b.trigger != null && _onPath(b.trigger!)) {
+        sum += b.type.bonus;
+      }
+    }
+    return sum;
+  }
+
+  bool _onPath(Cell c) => path?.any((st) => st.cell == c) ?? false;
+
+  /// The cell dips below the water table.
+  bool isWater(Cell c) => heights.isWet(c);
+
+  /// Cows wander only on dry land — no water, no launchpads.
+  bool _cowTerrain(Cell c) =>
+      !isWater(c) && !launchpads.containsKey(c);
+
+  Game() {
+    if (!_load()) _initialLayout();
+    _rebuildPath();
+  }
+
+  void setTool(Tool t) {
+    tool = tool == t ? Tool.none : t;
+    pendingPad = null; // switching tools abandons half-placed pieces
+    pendingSwitch = null;
+    notifyListeners();
+  }
+
+  void setSpeed(int v) {
+    speed = v;
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------ setup
+
+  void _initialLayout() {
+    board.clear();
+    buildings.clear();
+    deck.clear();
+    launchpads.clear();
+    pendingPad = null;
+    switches.clear();
+    pendingSwitch = null;
+    cows.clear();
+    cols = startCols;
+    rows = startRows;
+    deeds = 0;
+    heights.reset(cols, rows);
+    const x0 = 3, y0 = 3, x1 = 12, y1 = 8;
+    for (var x = x0 + 1; x < x1; x++) {
+      board[Cell(x, y0)] = TrackKind.ew;
+      board[Cell(x, y1)] = TrackKind.ew;
+    }
+    for (var y = y0 + 1; y < y1; y++) {
+      board[Cell(x0, y)] = TrackKind.ns;
+      board[Cell(x1, y)] = TrackKind.ns;
+    }
+    board[const Cell(x0, y0)] = TrackKind.se;
+    board[const Cell(x1, y0)] = TrackKind.sw;
+    board[const Cell(x1, y1)] = TrackKind.nw;
+    board[const Cell(x0, y1)] = TrackKind.ne;
+    buildings.add(Building(const Cell(7, 9), BuildingType.station, const Cell(7, 8)));
+    _generateTerrain();
+    _spawnCows(2);
+    balance = 80;
+    cars = 1;
+    s = 0;
+    lapBonus = 0;
+    _lastPath = null;
+  }
+
+  bool _protectedCell(Cell c) =>
+      board.containsKey(c) ||
+      launchpads.containsKey(c) ||
+      buildings.any((b) =>
+          (b.cell.x - c.x).abs() <= 1 && (b.cell.y - c.y).abs() <= 1);
+
+  void _generateTerrain() {
+    _generateRiver();
+    _carveBlobs(blobs: 2, minSize: 2, extraSize: 3);
+    _generateHills(3);
+  }
+
+  /// Sink one cell below the water table, if all four corners sit on the
+  /// plain, are unlocked, and have no elevated neighbors.
+  bool _carveCell(Cell c) {
+    final vs = [
+      (c.x, c.y), (c.x + 1, c.y), (c.x + 1, c.y + 1), (c.x, c.y + 1),
+    ];
+    for (final (vx, vy) in vs) {
+      final h = heights.vAt(vx, vy);
+      if (h > 0 || h < -1 || _lockedVertex(vx, vy)) return false;
+      for (var dx = -1; dx <= 1; dx++) {
+        for (var dy = -1; dy <= 1; dy++) {
+          final nx = vx + dx, ny = vy + dy;
+          if (nx < 0 || nx > cols || ny < 0 || ny > rows) continue;
+          if (heights.vAt(nx, ny) > 0) return false;
+        }
+      }
+    }
+    for (final (vx, vy) in vs) {
+      heights.setVertex(vx, vy, -1);
+    }
+    return true;
+  }
+
+  /// Raise a few random peaks with the terraform cascade. The vertex lock
+  /// keeps them away from track, buildings and water automatically.
+  void _generateHills(int count) {
+    var made = 0;
+    var guard = 0;
+    while (made < count && guard++ < 80) {
+      final vx = 1 + _rng.nextInt(cols - 1);
+      final vy = 1 + _rng.nextInt(rows - 1);
+      final steps = 2 + _rng.nextInt(2);
+      var raised = 0;
+      for (var i = 0; i < steps; i++) {
+        final plan = heights.planStep(vx, vy, 1, locked: _lockedVertex);
+        if (plan == null) break;
+        heights.apply(plan);
+        raised++;
+      }
+      if (raised > 0) made++;
+    }
+  }
+
+  /// A meandering carved channel from the top edge to the bottom, kept in a
+  /// three-column band beside the starter loop.
+  void _generateRiver() {
+    final left = _rng.nextBool();
+    final xMin = left ? 0 : cols - 3, xMax = left ? 2 : cols - 1;
+    var x = xMin + _rng.nextInt(xMax - xMin + 1);
+    void dig(Cell c) {
+      if (!_protectedCell(c)) _carveCell(c);
+    }
+
+    for (var y = 0; y < rows; y++) {
+      dig(Cell(x, y));
+      if (_rng.nextInt(3) == 0) {
+        final nx = x + (_rng.nextBool() ? 1 : -1);
+        if (nx >= xMin && nx <= xMax) {
+          x = nx;
+          dig(Cell(x, y));
+        }
+      }
+    }
+  }
+
+  /// Carves [blobs] random basins. Seeds land inside the optional region
+  /// (defaults to the whole board); growth may wander past it.
+  void _carveBlobs(
+      {required int blobs,
+      required int minSize,
+      required int extraSize,
+      int? xMin,
+      int? xMax,
+      int? yMin,
+      int? yMax}) {
+    final x0 = xMin ?? 0, x1 = xMax ?? cols - 1;
+    final y0 = yMin ?? 0, y1 = yMax ?? rows - 1;
+    var made = 0;
+    var guard = 0;
+    while (made < blobs && guard++ < 200) {
+      final seed = Cell(
+          x0 + _rng.nextInt(x1 - x0 + 1), y0 + _rng.nextInt(y1 - y0 + 1));
+      if (_protectedCell(seed) || isWater(seed) || !_carveCell(seed)) {
+        continue;
+      }
+      final size = minSize + _rng.nextInt(extraSize);
+      var cur = seed;
+      var carved = 1;
+      var grow = 0;
+      while (carved < size && grow++ < 12) {
+        final d = Dir.values[_rng.nextInt(4)];
+        final n = cur.step(d);
+        if (!inBounds(n) || _protectedCell(n)) continue;
+        if (isWater(n) || _carveCell(n)) {
+          carved++;
+          cur = n;
+        }
+      }
+      made++;
+    }
+  }
+
+  void _spawnCows(int n) {
+    var guard = 0;
+    while (n > 0 && guard++ < 200) {
+      final c = Cell(_rng.nextInt(cols), _rng.nextInt(rows));
+      if (board.containsKey(c) ||
+          !_cowTerrain(c) ||
+          _cellBlocked(c) ||
+          cows.any((k) => k.cell == c)) {
+        continue;
+      }
+      cows.add(Cow(c, 2 + _rng.nextDouble() * 3));
+      n--;
+    }
+  }
+
+  void newGame() {
+    _initialLayout();
+    _rebuildPath();
+    _save();
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------ path
+
+  void _rebuildPath() {
+    structureRev++;
+    final trigger = station.trigger;
+    List<PathStep>? p;
+    if (trigger != null && board.containsKey(trigger)) {
+      final kind = board[trigger]!;
+      p = traceLoop(board, trigger, kind.conn.first,
+              pads: launchpads, switches: switches) ??
+          traceLoop(board, trigger, kind.conn.last,
+              pads: launchpads, switches: switches);
+    }
+    path = p;
+    if (p != null) {
+      _lastPath = p;
+      if (s >= p.length) s = 0;
+    } else if (_lastPath != null && s >= _lastPath!.length) {
+      s = 0;
+    }
+    // Re-resolve building triggers (their track may have been bulldozed).
+    for (final b in buildings) {
+      if (b.trigger != null && !board.containsKey(b.trigger)) b.trigger = null;
+      b.trigger ??= _adjacentTrack(b.cell);
+    }
+  }
+
+  Cell? _adjacentTrack(Cell c) {
+    for (final d in Dir.values) {
+      final n = c.step(d);
+      if (board.containsKey(n)) return n;
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------------ laying track
+
+  bool inBounds(Cell c) => c.x >= 0 && c.x < cols && c.y >= 0 && c.y < rows;
+
+  bool _cellBlocked(Cell c) => buildings.any((b) => b.cell == c);
+
+  int _piecePrice(TrackKind kind, Cell c) =>
+      (kind.isCurve ? priceCurve : priceStraight) +
+      (isWater(c) ? priceBridge : 0);
+
+  /// Convert a dragged cell sequence into placeable pieces with auto-curves.
+  TrackPlan planTrack(List<Cell> drag) {
+    final cells = <Cell>[];
+    for (final c in drag) {
+      if (cells.isEmpty || cells.last != c) cells.add(c);
+    }
+    final pieces = <Planned>[];
+    var cost = 0;
+    var truncated = false;
+    int? level; // grade the rail rides at; bridges carry it over water
+    for (var i = 0; i < cells.length; i++) {
+      final c = cells[i];
+      if (!inBounds(c) ||
+          _cellBlocked(c) ||
+          launchpads.containsKey(c) ||
+          switches.containsKey(c)) {
+        break;
+      }
+      final wet = isWater(c);
+      int cellLevel;
+      if (wet) {
+        // A bridge deck holds the grade it was entered from; a drag can't
+        // begin over open water unless it starts on an existing bridge.
+        final existing = deck[c] ?? level;
+        if (existing == null) break;
+        cellLevel = existing;
+      } else {
+        if (!heights.isFlat(c)) break;
+        cellLevel = heights.floorOf(c);
+        // Rail stays level until phase 3 brings gradients.
+        if (level != null && cellLevel != level) break;
+      }
+      level = cellLevel;
+      Dir? toPrev = i > 0 ? _dirBetween(c, cells[i - 1]) : null;
+      Dir? toNext = i < cells.length - 1 ? _dirBetween(c, cells[i + 1]) : null;
+      if (i > 0 && toPrev == null) break; // non-adjacent jump: stop
+      TrackKind kind;
+      if (toPrev != null && toNext != null) {
+        final k = TrackKind.fromDirs(toPrev, toNext);
+        if (k == null) break; // pointer doubled back onto itself
+        kind = k;
+      } else {
+        final d = toPrev ?? toNext;
+        if (d == null) {
+          // Single-cell tap: default EW straight.
+          kind = TrackKind.ew;
+        } else {
+          kind = (d == Dir.e || d == Dir.w) ? TrackKind.ew : TrackKind.ns;
+        }
+      }
+      final existing = board[c];
+      if (existing != null) {
+        if (existing == kind) {
+          pieces.add(Planned(c, kind, 0)); // pass over matching track free
+          continue;
+        }
+        break; // conflicting track: stop the run here
+      }
+      final price = _piecePrice(kind, c);
+      if (cost + price > balance) {
+        truncated = true;
+        break;
+      }
+      cost += price;
+      pieces.add(Planned(c, kind, price,
+          bridge: wet, deckLevel: wet ? cellLevel : null));
+    }
+    return TrackPlan(pieces, cost, truncated);
+  }
+
+  Dir? _dirBetween(Cell from, Cell to) {
+    for (final d in Dir.values) {
+      if (from.step(d) == to) return d;
+    }
+    return null;
+  }
+
+  void commitTrack(TrackPlan plan) {
+    if (plan.isEmpty || plan.cost > balance) return;
+    for (final p in plan.pieces) {
+      board[p.cell] = p.kind;
+      final d = p.deckLevel;
+      if (d != null) deck[p.cell] = d;
+    }
+    balance -= plan.cost;
+    _rebuildPath();
+    _save();
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------ buildings
+
+  String? placeBuilding(BuildingType type, Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (isWater(c)) return "Can't build on water";
+    if (!heights.isFlat(c)) return 'Needs flat ground';
+    if (board.containsKey(c) ||
+        _cellBlocked(c) ||
+        launchpads.containsKey(c) ||
+        switches.containsKey(c)) {
+      return 'Cell occupied';
+    }
+    final trigger = _adjacentTrack(c);
+    if (trigger == null) return 'Must touch track';
+    if (balance < type.price) return 'Not enough money';
+    balance -= type.price;
+    buildings.add(Building(c, type, trigger));
+    structureRev++;
+    _save();
+    notifyListeners();
+    return null;
+  }
+
+  bool buyCar() {
+    if (balance < priceCar) return false;
+    balance -= priceCar;
+    cars++;
+    _save();
+    notifyListeners();
+    return true;
+  }
+
+  // ------------------------------------------------------------ terraform (elevation)
+
+  /// A vertex is locked when a structure occupies one of its incident cells:
+  /// terrain under track, buildings, pads and switches never moves. Water is
+  /// just low ground now, so it sculpts freely — that's how you drain it.
+  bool _lockedVertex(int vx, int vy) {
+    for (var dx = -1; dx <= 0; dx++) {
+      for (var dy = -1; dy <= 0; dy++) {
+        final c = Cell(vx + dx, vy + dy);
+        if (!inBounds(c)) continue;
+        if (board.containsKey(c) ||
+            switches.containsKey(c) ||
+            launchpads.containsKey(c) ||
+            _cellBlocked(c)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Raise (delta 1) or lower (delta -1) the cell corner nearest [frac],
+  /// cascading neighbors and charging per height-step moved.
+  String? sculpt(Cell c, Offset frac, int delta) {
+    if (!inBounds(c)) return 'Out of bounds';
+    final vx = c.x + (frac.dx > 0.5 ? 1 : 0);
+    final vy = c.y + (frac.dy > 0.5 ? 1 : 0);
+    final plan = heights.planStep(vx, vy, delta, locked: _lockedVertex);
+    if (plan == null) return "Can't reshape under track or buildings";
+    final cost = heights.stepsIn(plan) * priceTerraformStep;
+    if (cost > balance) return 'Not enough money';
+    balance -= cost;
+    heights.apply(plan);
+    structureRev++;
+    _save();
+    notifyListeners();
+    return null;
+  }
+
+  // ------------------------------------------------------------ land deeds
+
+  int get deedPrice => 400 + 200 * deeds;
+  bool get canExpandEast => cols + expandStep <= maxCols;
+  bool get canExpandSouth => rows + expandStep <= maxRows;
+
+  /// Buy a strip of frontier: [east] adds columns, otherwise rows. The new
+  /// land gets a sprinkle of fresh terrain to tame.
+  bool buyLand({required bool east}) {
+    if (east ? !canExpandEast : !canExpandSouth) return false;
+    if (balance < deedPrice) return false;
+    balance -= deedPrice;
+    deeds++;
+    if (east) {
+      final x0 = cols;
+      cols += expandStep;
+      heights.expand(cols, rows);
+      _carveBlobs(blobs: 1, minSize: 2, extraSize: 3, xMin: x0);
+    } else {
+      final y0 = rows;
+      rows += expandStep;
+      heights.expand(cols, rows);
+      _carveBlobs(blobs: 1, minSize: 2, extraSize: 3, yMin: y0);
+    }
+    _generateHills(1);
+    structureRev++;
+    _save();
+    notifyListeners();
+    return true;
+  }
+
+  // ------------------------------------------------------------ launchpads
+
+  /// Two-tap placement: first tap arms a pad, second tap links the pair.
+  /// Tapping the armed pad again cancels it. Returns an error, or null.
+  String? tapLaunchpad(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (pendingPad == c) {
+      pendingPad = null;
+      notifyListeners();
+      return null;
+    }
+    if (launchpads.containsKey(c)) return 'Already a launchpad';
+    if (board.containsKey(c) || switches.containsKey(c)) {
+      return 'Remove the track first';
+    }
+    if (_cellBlocked(c)) return 'Cell occupied';
+    if (isWater(c)) return "Can't float on water";
+    if (!heights.isFlat(c)) return 'Needs flat ground';
+    if (balance < priceLaunchpad) return 'Not enough money';
+    final first = pendingPad;
+    if (first == null) {
+      pendingPad = c;
+      notifyListeners();
+      return null;
+    }
+    balance -= priceLaunchpad;
+    launchpads[first] = c;
+    launchpads[c] = first;
+    pendingPad = null;
+    _rebuildPath();
+    _save();
+    notifyListeners();
+    return null;
+  }
+
+  // ------------------------------------------------------------ switches
+
+  /// Two-tap placement: first tap arms an existing track piece, second tap
+  /// picks the free side that becomes the junction's base leg. Tapping the
+  /// armed piece again cancels.
+  String? tapSwitch(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    final first = pendingSwitch;
+    if (first == c) {
+      pendingSwitch = null;
+      notifyListeners();
+      return null;
+    }
+    if (first == null) {
+      if (switches.containsKey(c)) return 'Already a switch';
+      if (!board.containsKey(c)) return 'Tap an existing track piece';
+      if (balance < priceSwitch) return 'Not enough money';
+      pendingSwitch = c;
+      notifyListeners();
+      return null;
+    }
+    final d = _dirBetween(first, c);
+    if (d == null) return 'Tap a cell beside the armed track piece';
+    final piece = board[first]!;
+    if (piece.conn.contains(d)) return 'The junction must face a free side';
+    if (balance < priceSwitch) return 'Not enough money';
+    balance -= priceSwitch;
+    final legs = piece.conn.toList();
+    switches[first] = TrackSwitch(first, d, legs[0], legs[1]);
+    board.remove(first);
+    pendingSwitch = null;
+    _rebuildPath();
+    _save();
+    notifyListeners();
+    return null;
+  }
+
+  /// Flip a turnout's points (no-op on non-switch cells).
+  void toggleSwitch(Cell c) {
+    final sw = switches[c];
+    if (sw == null) return;
+    sw.useB = !sw.useB;
+    _rebuildPath();
+    if (toasts.length < 6) {
+      toasts.add(
+          Toast(c.x + 0.5, c.y - 0.3, path == null ? 'No route!' : 'Switched'));
+    }
+    _save();
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------ bulldoze
+
+  void bulldoze(Cell c) {
+    if (switches.containsKey(c)) {
+      switches.remove(c);
+      balance += priceSwitch ~/ 2;
+      _rebuildPath();
+      _save();
+      notifyListeners();
+      return;
+    }
+    final partner = launchpads[c];
+    if (partner != null) {
+      launchpads.remove(c);
+      launchpads.remove(partner);
+      balance += priceLaunchpad ~/ 2;
+      _rebuildPath();
+      _save();
+      notifyListeners();
+      return;
+    }
+    final bIdx = buildings.indexWhere((b) => b.cell == c);
+    if (bIdx > 0) {
+      // main station (index 0) is not removable
+      balance += buildings[bIdx].type.price ~/ 2;
+      buildings.removeAt(bIdx);
+      _rebuildPath();
+      _save();
+      notifyListeners();
+      return;
+    }
+    final piece = board[c];
+    if (piece != null) {
+      board.remove(c);
+      deck.remove(c);
+      balance += _piecePrice(piece, c) ~/ 2;
+      _rebuildPath();
+      _save();
+      notifyListeners();
+    }
+  }
+
+  // ------------------------------------------------------------ whistle
+
+  Cell? get engineCell {
+    final p = renderPath;
+    if (p == null || p.isEmpty) return null;
+    return p[s.floor() % p.length].cell;
+  }
+
+  /// Toot the horn; any cow near the engine bolts somewhere far away.
+  void honk() {
+    Horn.play();
+    final eng = engineCell;
+    if (eng != null) {
+      for (final cow in cows) {
+        final near =
+            (cow.cell.x - eng.x).abs() <= 2 && (cow.cell.y - eng.y).abs() <= 2;
+        if (near) _relocateCow(cow, eng);
+      }
+    }
+    notifyListeners();
+  }
+
+  void _relocateCow(Cow cow, Cell awayFrom) {
+    for (var i = 0; i < 40; i++) {
+      final c = Cell(_rng.nextInt(cols), _rng.nextInt(rows));
+      final far = (c.x - awayFrom.x).abs() + (c.y - awayFrom.y).abs() >= 5;
+      if (far &&
+          !board.containsKey(c) &&
+          _cowTerrain(c) &&
+          !_cellBlocked(c)) {
+        cow.cell = c;
+        toasts.add(Toast(c.x + 0.5, c.y - 0.3, 'Moo?'));
+        return;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ cows
+
+  void _updateCows(double dt) {
+    for (final cow in cows) {
+      cow.moveIn -= dt;
+      // Catch up step by step when a tick covers a long gap (throttled tab).
+      var guard = 0;
+      while (cow.moveIn <= 0 && guard++ < 40) {
+        cow.moveIn += 2.2 + _rng.nextDouble() * 2.5;
+        _stepCow(cow);
+      }
+    }
+  }
+
+  void _stepCow(Cow cow) {
+    final d = Dir.values[_rng.nextInt(4)];
+    final n = cow.cell.step(d);
+    if (inBounds(n) &&
+        _cowTerrain(n) &&
+        !_cellBlocked(n) &&
+        !cows.any((k) => k != cow && k.cell == n)) {
+      cow.cell = n;
+    }
+    // A wandering cow crosses rails briskly instead of parking on them.
+    if (board.containsKey(cow.cell) && cow.moveIn > 0.8) cow.moveIn = 0.8;
+  }
+
+  bool _cowAt(Cell c) => cows.any((k) => k.cell == c);
+
+  // ------------------------------------------------------------ simulation
+
+  void tick(double dt) {
+    var dirty = false;
+    for (final t in toasts) {
+      t.age += dt;
+    }
+    if (toasts.isNotEmpty) {
+      toasts.removeWhere((t) => t.age > 1.8);
+      dirty = true;
+    }
+    if (speed > 0) {
+      _updateCows(dt);
+      dirty = true;
+    }
+    final p = path;
+    cowBlocked = false;
+    if (p != null && speed > 0) {
+      final len = p.length;
+      // Advance cell by cell so bonuses and payouts fire even when a single
+      // tick covers several cells (throttled/background tabs catch up).
+      var adv = dt * tilesPerSecond * speed;
+      var paidOut = false;
+      while (adv > 0) {
+        final idx = s.floor();
+        final nextIdx = (idx + 1) % len;
+        if (_cowAt(p[nextIdx].cell)) {
+          cowBlocked = true;
+          s = math.min(s, idx + 0.94); // pull up short of the cow
+          break;
+        }
+        final toBoundary = idx + 1 - s;
+        if (adv < toBoundary) {
+          s += adv;
+          break;
+        }
+        s += toBoundary;
+        adv -= toBoundary;
+        if (s >= len) {
+          s = 0;
+          final payout = cars * len + lapBonus;
+          balance += payout;
+          lapBonus = 0;
+          paidOut = true;
+          final st = station.cell;
+          if (toasts.length < 6) {
+            toasts.add(Toast(st.x + 0.5, st.y - 0.6, '+\$$payout', big: true));
+          }
+        }
+        // s sits exactly on a cell boundary: the train just entered this cell.
+        final cell = p[s.floor() % len].cell;
+        for (final b in buildings) {
+          if (b.type.bonus > 0 && b.trigger == cell) {
+            lapBonus += b.type.bonus;
+            if (toasts.length < 6) {
+              toasts.add(
+                  Toast(b.cell.x + 0.5, b.cell.y - 0.4, '+\$${b.type.bonus}'));
+            }
+          }
+        }
+      }
+      if (paidOut) _save();
+      dirty = true;
+    }
+    if (dirty) notifyListeners();
+  }
+
+  // ------------------------------------------------------------ persistence
+
+  static const _key = 'ct_save_v3';
+  static const _legacyKeys = ['ct_save_v2', 'ct_save_v1'];
+
+  void _save() {
+    final data = {
+      'board': {for (final e in board.entries) e.key.toString(): e.value.index},
+      'buildings': [
+        for (final b in buildings)
+          {'x': b.cell.x, 'y': b.cell.y, 't': b.type.index},
+      ],
+      'deck': {for (final e in deck.entries) e.key.toString(): e.value},
+      'cows': [for (final k in cows) k.cell.toString()],
+      'pads': [
+        // Each pair once; the map holds both directions.
+        for (final e in launchpads.entries)
+          if (e.key.toString().compareTo(e.value.toString()) < 0)
+            '${e.key}|${e.value}',
+      ],
+      'switches': [
+        for (final s in switches.values)
+          {
+            'c': s.cell.toString(),
+            'b': s.base.index,
+            'a1': s.branchA.index,
+            'a2': s.branchB.index,
+            'u': s.useB,
+          },
+      ],
+      'cols': cols,
+      'rows': rows,
+      'deeds': deeds,
+      'heights': heights.toList(),
+      'balance': balance,
+      'cars': cars,
+    };
+    web.window.localStorage.setItem(_key, jsonEncode(data));
+    for (final k in _legacyKeys) {
+      web.window.localStorage.removeItem(k);
+    }
+  }
+
+  bool _load() {
+    var raw = web.window.localStorage.getItem(_key);
+    final fromLegacy = raw == null;
+    for (final k in _legacyKeys) {
+      raw ??= web.window.localStorage.getItem(k);
+    }
+    if (raw == null) return false;
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      board.clear();
+      (data['board'] as Map<String, dynamic>).forEach((k, v) {
+        board[Cell.parse(k)] = TrackKind.values[v as int];
+      });
+      buildings.clear();
+      for (final b in (data['buildings'] as List)) {
+        final t = b['t'] as int;
+        if (t >= BuildingType.values.length) continue; // from older versions
+        buildings.add(
+            Building(Cell(b['x'] as int, b['y'] as int), BuildingType.values[t]));
+      }
+      if (buildings.isEmpty || buildings.first.type != BuildingType.station) {
+        return false;
+      }
+      // Legacy object-terrain: mountains rise into the heightfield, water
+      // cells carve below the table (both after heights load, below).
+      final legacyMountains = <Cell>[];
+      final legacyWater = <Cell>[];
+      final terr = data['terrain'] as Map<String, dynamic>?;
+      if (terr != null) {
+        terr.forEach((k, v) {
+          if (v == 'mountain') legacyMountains.add(Cell.parse(k));
+          if (v == 'water') legacyWater.add(Cell.parse(k));
+        });
+      } else if (data['deck'] == null) {
+        // v1 save: ponds were a bare cell list.
+        for (final c in (data['ponds'] as List? ?? [])) {
+          legacyWater.add(Cell.parse(c as String));
+        }
+      }
+      deck.clear();
+      (data['deck'] as Map<String, dynamic>? ?? {}).forEach((k, v) {
+        deck[Cell.parse(k)] = v as int;
+      });
+      cows.clear();
+      for (final c in (data['cows'] as List? ?? [])) {
+        cows.add(Cow(Cell.parse(c as String), 2 + _rng.nextDouble() * 3));
+      }
+      while (cows.length > 3) {
+        cows.removeLast(); // older versions could leave a whole herd behind
+      }
+      launchpads.clear();
+      for (final p in (data['pads'] as List? ?? [])) {
+        final ends = (p as String).split('|');
+        final a = Cell.parse(ends[0]), b = Cell.parse(ends[1]);
+        launchpads[a] = b;
+        launchpads[b] = a;
+      }
+      switches.clear();
+      for (final s in (data['switches'] as List? ?? [])) {
+        final cell = Cell.parse(s['c'] as String);
+        switches[cell] = TrackSwitch(
+          cell,
+          Dir.values[s['b'] as int],
+          Dir.values[s['a1'] as int],
+          Dir.values[s['a2'] as int],
+          useB: s['u'] as bool? ?? false,
+        );
+      }
+      cols = (data['cols'] as int? ?? startCols).clamp(startCols, maxCols);
+      rows = (data['rows'] as int? ?? startRows).clamp(startRows, maxRows);
+      deeds = data['deeds'] as int? ?? 0;
+      heights.reset(cols, rows);
+      final hs = data['heights'] as List?;
+      if (hs != null) heights.loadFrom([for (final h in hs) h as int]);
+      // Legacy mountains rise into the heightfield, best effort: each corner
+      // climbs toward 2 unless a structure locks the cascade.
+      for (final mc in legacyMountains) {
+        for (final (vx, vy) in [
+          (mc.x, mc.y),
+          (mc.x + 1, mc.y),
+          (mc.x + 1, mc.y + 1),
+          (mc.x, mc.y + 1),
+        ]) {
+          var guard = 0;
+          while (heights.vAt(vx, vy) < 2 && guard++ < 4) {
+            final p = heights.planStep(vx, vy, 1, locked: _lockedVertex);
+            if (p == null) break;
+            heights.apply(p);
+          }
+        }
+      }
+      // Legacy water cells sink one step below their old floor; any track
+      // that crossed them becomes a bridge deck at the old grade.
+      final waterFloors = {
+        for (final wc in legacyWater)
+          if (inBounds(wc)) wc: heights.floorOf(wc),
+      };
+      waterFloors.forEach((wc, f) {
+        for (final (vx, vy) in [
+          (wc.x, wc.y),
+          (wc.x + 1, wc.y),
+          (wc.x + 1, wc.y + 1),
+          (wc.x, wc.y + 1),
+        ]) {
+          heights.setVertex(vx, vy, math.min(heights.vAt(vx, vy), f - 1));
+        }
+        if (board.containsKey(wc) || switches.containsKey(wc)) deck[wc] = f;
+      });
+      balance = data['balance'] as int;
+      cars = data['cars'] as int;
+      for (final b in buildings) {
+        b.trigger = _adjacentTrack(b.cell);
+      }
+      if (board.isEmpty) return false;
+      if (fromLegacy) {
+        _save(); // migrate to the current key right away
+        for (final k in _legacyKeys) {
+          web.window.localStorage.removeItem(k);
+        }
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+}
