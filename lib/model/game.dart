@@ -640,6 +640,13 @@ class Game extends ChangeNotifier {
     return null;
   }
 
+  /// Dev cheat: free money, bound to the "+" key.
+  void devGrant([int amount = 200]) {
+    balance += amount;
+    _save();
+    notifyListeners();
+  }
+
   bool buyCar() {
     if (balance < priceCar) return false;
     balance -= priceCar;
