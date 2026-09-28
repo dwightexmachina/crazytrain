@@ -190,7 +190,7 @@ class _BoardViewState extends State<BoardView>
     // Drag-painting tools: apply silently, skipping cells that reject.
     switch (game.tool) {
       case Tool.bulldoze:
-        game.bulldoze(c);
+        game.bulldoze(c, scrapTrains: false); // drags raze, taps scrap
         return;
       case Tool.raiseLand:
         _sculpt(local, 1);

@@ -676,6 +676,8 @@ class DynamicPainter extends CustomPainter {
     // Placement tools tint by validity: green would take, red would refuse.
     final h = hover.value;
     if (h != null && game.tool != Tool.none) {
+      final scrapTarget =
+          game.tool == Tool.bulldoze ? game.trainEngineAt(h) : null;
       final color = switch (game.tool) {
         Tool.bulldoze => Pal.ghostBad,
         Tool.stop || Tool.depot =>
@@ -687,6 +689,24 @@ class DynamicPainter extends CustomPainter {
         _ => Pal.hover,
       };
       _face(c, color, cellQuad(h));
+      // Bulldozing an engine scraps the TRAIN, not the track: lock a red
+      // target ring onto it so the difference is unmistakable.
+      if (scrapTarget != null && game.trains.length > 1) {
+        final z = (game.deck[h]?.toDouble() ?? hf.centerZ(h)) * kZStep;
+        final center = v.pt(h.x + 0.5, h.y + 0.5, z + 0.15);
+        for (final r in const [0.46, 0.3]) {
+          c.drawOval(
+            Rect.fromCenter(
+                center: center,
+                width: 2 * Iso.kx * r * v.s,
+                height: 2 * Iso.ky * r * v.s),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.6
+              ..color = Pal.bad,
+          );
+        }
+      }
     }
 
     // Drag ghost. Bridges preview at deck grade, straights at their slope.

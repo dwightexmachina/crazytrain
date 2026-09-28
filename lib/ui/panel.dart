@@ -267,7 +267,8 @@ class _ShopPanelState extends State<ShopPanel> {
           title: 'Bulldoze',
           tag: 'RAZE',
           danger: true,
-          desc: 'Remove track or buildings · 50% refund.',
+          desc:
+              'Remove track or buildings · 50% refund. Tap an engine (target ring) to scrap that train — your last train stays.',
         ),
       ];
 
@@ -546,7 +547,8 @@ class _ShopPanelState extends State<ShopPanel> {
         'Drag across the board to lay track. Corners become curves automatically. Straights climb one step per cell; curves need flat ground. Trains slow uphill and speed downhill.',
       Tool.stop || Tool.depot =>
         'Tap an empty cell next to your track. Uneven ground is leveled automatically (\$${Game.priceTerraformStep} per step). It pays its bonus every time the train passes.',
-      Tool.bulldoze => 'Tap or drag over track and buildings to remove them.',
+      Tool.bulldoze =>
+        'Tap or drag over track and buildings to remove them. A red target ring means you\'re aiming at a train\'s engine: tapping scraps that train for half its value (drags never scrap).',
       Tool.raiseLand =>
         'Tap or drag to lift the ground one step at a time. Neighboring land follows so hills stay smooth — raise a riverbed to drain it.',
       Tool.lowerLand =>

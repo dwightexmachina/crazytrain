@@ -1240,7 +1240,42 @@ class Game extends ChangeNotifier {
 
   // ------------------------------------------------------------ bulldoze
 
-  void bulldoze(Cell c) {
+  /// The train whose engine currently sits on [c], if any.
+  Train? trainEngineAt(Cell c) {
+    for (final t in trains) {
+      final p = t.renderPath;
+      if (p == null || p.isEmpty) continue;
+      if (p[t.s.floor() % p.length].cell == c) return t;
+    }
+    return null;
+  }
+
+  void bulldoze(Cell c, {bool scrapTrains = true}) {
+    // A tap on an engine scraps that train (never mid-drag, and never the
+    // last one).
+    if (scrapTrains) {
+      final victim = trainEngineAt(c);
+      if (victim != null) {
+        if (trains.length == 1) {
+          if (toasts.length < 6) {
+            toasts.add(Toast(c.x + 0.5, c.y - 0.4, 'Your last train stays'));
+          }
+          notifyListeners();
+          return;
+        }
+        final refund =
+            priceSecondTrain ~/ 2 + victim.cars * (priceCar ~/ 2);
+        trains.remove(victim);
+        balance += refund;
+        if (toasts.length < 6) {
+          toasts.add(
+              Toast(c.x + 0.5, c.y - 0.4, 'Scrapped +\$$refund', big: true));
+        }
+        _save();
+        notifyListeners();
+        return;
+      }
+    }
     final portal = tunnels[c];
     if (portal != null) {
       tunnels.remove(c);

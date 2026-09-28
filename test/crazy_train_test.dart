@@ -815,6 +815,37 @@ void main() {
       expect(t2.path![t2.s.floor() % t2.path!.length].cell, spot);
     });
 
+    test('bulldozing an engine scraps the train, but never the last one', () {
+      final g = flatGame();
+      g.balance = 5000;
+      g.cows.clear();
+      g.speed = 0;
+      // The last train is protected.
+      final t1Engine = g.trainEngineAt(g.path!.first.cell) == null
+          ? g.path![g.s.floor() % g.path!.length].cell
+          : g.path!.first.cell;
+      final only = g.trains.length;
+      g.bulldoze(g.path![g.s.floor() % g.path!.length].cell);
+      expect(g.trains.length, only);
+      // With two trains, tapping the second engine scraps it with refund.
+      g.buySecondTrain();
+      final t2 = g.trains[1];
+      t2.cars = 3;
+      final engineCell = t2.renderPath![t2.s.floor() % t2.renderPath!.length].cell;
+      final bal = g.balance;
+      g.bulldoze(engineCell);
+      expect(g.trains.length, 1);
+      expect(g.balance,
+          bal + Game.priceSecondTrain ~/ 2 + 3 * (Game.priceCar ~/ 2));
+      // Drags never scrap.
+      g.buySecondTrain();
+      final t3 = g.trains[1];
+      final e3 = t3.renderPath![t3.s.floor() % t3.renderPath!.length].cell;
+      g.bulldoze(e3, scrapTrains: false);
+      expect(g.trains.length, 2);
+      expect(t1Engine, isNotNull);
+    });
+
     test('signals toggle on track only and persist', () {
       final g = flatGame();
       g.balance = 1000;
