@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'audio/riff.dart';
 import 'model/game.dart';
 import 'ui/board_view.dart';
 import 'ui/palette.dart';
@@ -22,15 +21,6 @@ class TrainMakerApp extends StatefulWidget {
 class _TrainMakerAppState extends State<TrainMakerApp> {
   final Game game = Game();
   bool _splash = true;
-
-  @override
-  void initState() {
-    super.initState();
-    // Start the riff with the splash if the browser lets us (it does on
-    // reloads and trusted visits); a cold first visit waits for the first
-    // gesture, which the splash tap provides.
-    WidgetsBinding.instance.addPostFrameCallback((_) => Riff.play());
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -72,10 +62,7 @@ class _TrainMakerAppState extends State<TrainMakerApp> {
                 ),
                 if (_splash)
                   SplashScreen(
-                    onDismiss: () {
-                      setState(() => _splash = false);
-                      Riff.play(); // the dismissal tap unlocked audio
-                    },
+                    onDismiss: () => setState(() => _splash = false),
                   ),
               ],
             ),
