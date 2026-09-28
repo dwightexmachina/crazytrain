@@ -8,6 +8,7 @@ import 'dart:ui' show Offset;
 
 import '../audio/horn.dart';
 import 'heightfield.dart';
+import 'scenario.dart';
 import 'track.dart';
 
 export 'heightfield.dart';
@@ -140,6 +141,17 @@ class Game extends ChangeNotifier {
   Tool tool = Tool.none;
   bool cowBlocked = false;
 
+  /// The scenario this world plays, or null for the freeplay sandbox.
+  final Scenario? scenario;
+
+  /// Mission ids already earned for this scenario (stars persist forever,
+  /// even across Start over).
+  late final Set<String> missionsDone =
+      scenario == null ? <String>{} : ScenarioProgress.done(scenario!.id);
+  int cowsShooed = 0; // cows relocated by the horn, for mission checks
+  int bestLapPayout = 0; // richest single-lap payout so far
+  double _missionTimer = 0;
+
   // Legacy single-train accessors: the first train is the original one.
   double get s => trains.first.s;
   set s(double v) => trains.first.s = v;
@@ -191,8 +203,8 @@ class Game extends ChangeNotifier {
     return hi - lo <= 1;
   }
 
-  Game() {
-    if (!_load()) _initialLayout();
+  Game({this.scenario, bool resume = true}) {
+    if (!(resume && _load())) _initialLayout();
     _rebuildPath();
   }
 
@@ -226,9 +238,21 @@ class Game extends ChangeNotifier {
     tunnels.clear();
     pendingTunnel = null;
     cows.clear();
+    deeds = 0;
+    cowsShooed = 0;
+    bestLapPayout = 0;
+    trains
+      ..clear()
+      ..add(Train(cars: 1, reversed: false));
+    signals.clear();
+    heldSignals.clear();
+    final sc = scenario;
+    if (sc != null && sc.build != null) {
+      sc.build!(this); // the scenario lays out its whole world
+      return;
+    }
     cols = startCols;
     rows = startRows;
-    deeds = 0;
     heights.reset(cols, rows);
     const x0 = 3, y0 = 3, x1 = 12, y1 = 8;
     for (var x = x0 + 1; x < x1; x++) {
@@ -247,11 +271,6 @@ class Game extends ChangeNotifier {
     _generateTerrain();
     _spawnCows(2);
     balance = 80;
-    trains
-      ..clear()
-      ..add(Train(cars: 1, reversed: false));
-    signals.clear();
-    heldSignals.clear();
   }
 
   bool _protectedCell(Cell c) =>
@@ -1342,13 +1361,13 @@ class Game extends ChangeNotifier {
       for (final cow in cows) {
         final near =
             (cow.cell.x - eng.x).abs() <= 2 && (cow.cell.y - eng.y).abs() <= 2;
-        if (near) _relocateCow(cow, eng);
+        if (near && _relocateCow(cow, eng)) cowsShooed++;
       }
     }
     notifyListeners();
   }
 
-  void _relocateCow(Cow cow, Cell awayFrom) {
+  bool _relocateCow(Cow cow, Cell awayFrom) {
     for (var i = 0; i < 40; i++) {
       final c = Cell(_rng.nextInt(cols), _rng.nextInt(rows));
       final far = (c.x - awayFrom.x).abs() + (c.y - awayFrom.y).abs() >= 5;
@@ -1358,9 +1377,10 @@ class Game extends ChangeNotifier {
           !_cellBlocked(c)) {
         cow.cell = c;
         toasts.add(Toast(c.x + 0.5, c.y - 0.3, 'Moo?'));
-        return;
+        return true;
       }
     }
+    return false;
   }
 
   // ------------------------------------------------------------ cows
@@ -1466,6 +1486,7 @@ class Game extends ChangeNotifier {
         tr.s = 0;
         final payout = tr.cars * len + tr.lapBonus;
         balance += payout;
+        if (payout > bestLapPayout) bestLapPayout = payout;
         tr.lapBonus = 0;
         paidOut = true;
         final st = station.cell;
@@ -1560,13 +1581,50 @@ class Game extends ChangeNotifier {
       }
       dirty = true;
     }
+    if (scenario != null) {
+      _missionTimer += dt;
+      if (_missionTimer >= 1) {
+        _missionTimer = 0;
+        if (checkMissions()) dirty = true;
+      }
+    }
     if (dirty) notifyListeners();
+  }
+
+  /// Poll the scenario's contracts; newly satisfied ones latch as earned
+  /// stars. Returns true when a star was just won.
+  bool checkMissions() {
+    final sc = scenario;
+    if (sc == null) return false;
+    var won = false;
+    for (final m in sc.missions) {
+      if (missionsDone.contains(m.id)) continue;
+      if (!m.check(this)) continue;
+      missionsDone.add(m.id);
+      ScenarioProgress.markDone(sc.id, m.id);
+      final st = station.cell;
+      toasts.add(Toast(st.x + 0.5, st.y - 1.2, '★ ${m.title}', big: true));
+      won = true;
+    }
+    return won;
   }
 
   // ------------------------------------------------------------ persistence
 
-  static const _key = 'ct_save_v3';
+  static const _sandboxKey = 'ct_save_v3';
   static const _legacyKeys = ['ct_save_v2', 'ct_save_v1'];
+
+  static String keyFor(String? scenarioId) =>
+      scenarioId == null ? _sandboxKey : '${_sandboxKey}_s_$scenarioId';
+
+  String get _key => keyFor(scenario?.id);
+
+  /// Whether a saved world exists for [scenarioId] (null = sandbox).
+  static bool hasSaveFor(String? scenarioId) =>
+      web.window.localStorage.getItem(keyFor(scenarioId)) != null;
+
+  /// Persist immediately — used when leaving for the route map.
+  void saveNow() => _save();
 
   void _save() {
     final data = {
@@ -1609,18 +1667,25 @@ class Game extends ChangeNotifier {
       'heights': heights.toList(),
       'balance': balance,
       'cars': cars,
+      'shooed': cowsShooed,
+      'bestLap': bestLapPayout,
     };
     web.window.localStorage.setItem(_key, jsonEncode(data));
-    for (final k in _legacyKeys) {
-      web.window.localStorage.removeItem(k);
+    if (scenario == null) {
+      for (final k in _legacyKeys) {
+        web.window.localStorage.removeItem(k);
+      }
     }
   }
 
   bool _load() {
     var raw = web.window.localStorage.getItem(_key);
-    final fromLegacy = raw == null;
-    for (final k in _legacyKeys) {
-      raw ??= web.window.localStorage.getItem(k);
+    var fromLegacy = false;
+    if (scenario == null) {
+      fromLegacy = raw == null;
+      for (final k in _legacyKeys) {
+        raw ??= web.window.localStorage.getItem(k);
+      }
     }
     if (raw == null) return false;
     try {
@@ -1743,6 +1808,8 @@ class Game extends ChangeNotifier {
       // Saves from before trees were map-owned get a fresh scatter.
       if (data['trees'] == null) _scatterTrees((cols * rows) ~/ 24);
       balance = data['balance'] as int;
+      cowsShooed = data['shooed'] as int? ?? 0;
+      bestLapPayout = data['bestLap'] as int? ?? 0;
       signals.clear();
       for (final c in (data['signals'] as List? ?? [])) {
         signals.add(Cell.parse(c as String));

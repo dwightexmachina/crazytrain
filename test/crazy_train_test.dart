@@ -5,6 +5,7 @@ import 'package:web/web.dart' as web;
 
 import 'package:crazytrain/main.dart';
 import 'package:crazytrain/model/game.dart';
+import 'package:crazytrain/model/scenario.dart';
 import 'package:crazytrain/model/track.dart';
 import 'package:crazytrain/ui/board_view.dart';
 import 'package:crazytrain/ui/painters.dart';
@@ -919,6 +920,113 @@ void main() {
         expect(g.board[Cell(x, 1)], TrackKind.ew,
             reason: 'cell ($x,1) should be laid');
       }
+    });
+  });
+
+  group('scenarios', () {
+    Game scenarioGame(String id) {
+      web.window.localStorage.clear();
+      return Game(scenario: Scenarios.byId(id), resume: false);
+    }
+
+    test('prairie builds a running world with cows and knolls', () {
+      final g = scenarioGame('prairie');
+      expect(g.cols, 20);
+      expect(g.rows, 14);
+      expect(g.path, isNotNull, reason: 'starter loop must close');
+      expect(g.cows.length, 4);
+      expect(g.balance, 300);
+      expect(
+          [for (var x = 0; x < g.cols; x++)
+            for (var y = 0; y < g.rows; y++) Cell(x, y)]
+              .any(g.isWater),
+          isTrue,
+          reason: 'the watering hole should be wet');
+    });
+
+    test('gorge builds a wet canyon with far-bank buildings', () {
+      final g = scenarioGame('gorge');
+      expect(g.path, isNotNull);
+      // Canyon is wet the whole way down the middle.
+      for (var y = 0; y < g.rows; y++) {
+        expect(g.isWater(Cell(11, y)) || g.isWater(Cell(12, y)), isTrue,
+            reason: 'row $y should hold water');
+      }
+      // Both bonus buildings wait on the east bank.
+      expect(
+          g.buildings
+              .where((b) => b.type != BuildingType.station)
+              .every((b) => b.cell.x >= 15),
+          isTrue);
+      // Starter loop stays dry on the west bank.
+      expect(g.path!.every((st) => st.cell.x <= 8), isTrue);
+    });
+
+    test('missions latch as stars and persist across Start over', () {
+      final g = scenarioGame('prairie');
+      expect(g.checkMissions(), isFalse);
+      g.balance = 2500;
+      g.cowsShooed = 3;
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, containsAll(['nest-egg', 'cowboy']));
+      expect(ScenarioProgress.stars('prairie'), 2);
+      g.newGame(); // Start over rebuilds the map…
+      expect(g.balance, 300);
+      expect(g.cowsShooed, 0);
+      // …but earned stars survive in a fresh game instance.
+      final again = Game(scenario: Scenarios.byId('prairie'), resume: false);
+      expect(again.missionsDone, containsAll(['nest-egg', 'cowboy']));
+    });
+
+    test('gorge bank missions read the traced route', () {
+      final g = scenarioGame('gorge');
+      expect(g.missionsDone, isEmpty);
+      expect(g.checkMissions(), isFalse);
+      g.balance = 5000;
+      // Rewire the loop the way a player would: knock out its east column,
+      // then drag one detour across the canyon and back — over at y=4,
+      // around the east bank, home at y=9.
+      for (var y = 4; y <= 9; y++) {
+        g.bulldoze(Cell(7, y));
+      }
+      final detour = g.planTrack([
+        for (var x = 6; x <= 16; x++) Cell(x, 4),
+        for (var y = 5; y <= 9; y++) Cell(16, y),
+        for (var x = 15; x >= 6; x--) Cell(x, 9),
+      ]);
+      expect(detour.isEmpty, isFalse, reason: 'detour must be plannable');
+      expect(detour.truncatedByFunds, isFalse);
+      g.commitTrack(detour);
+      expect(g.path, isNotNull, reason: 'loop must close over the gorge');
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, contains('span'));
+      expect(g.missionsDone, contains('twice'),
+          reason: 'out at y=5 and back at y=8 are two distinct crossings');
+    });
+
+    test('scenario saves live in their own slot, sandbox untouched', () {
+      web.window.localStorage.clear();
+      final sandbox = Game();
+      sandbox.newGame();
+      final sandboxRaw = web.window.localStorage.getItem('ct_save_v3');
+      expect(sandboxRaw, isNotNull);
+      final g = Game(scenario: Scenarios.byId('prairie'), resume: false);
+      g.saveNow();
+      expect(Game.hasSaveFor('prairie'), isTrue);
+      expect(web.window.localStorage.getItem('ct_save_v3'), sandboxRaw,
+          reason: 'scenario play must not touch the sandbox save');
+      final resumed = Game(scenario: Scenarios.byId('prairie'));
+      expect(resumed.cols, 20);
+      expect(resumed.balance, 300);
+    });
+
+    test('the line unlocks stop by stop', () {
+      web.window.localStorage.clear();
+      expect(ScenarioProgress.unlocked(0), isTrue);
+      expect(ScenarioProgress.unlocked(1), isFalse);
+      ScenarioProgress.markDone('prairie', 'nest-egg');
+      expect(ScenarioProgress.unlocked(1), isTrue);
+      expect(ScenarioProgress.unlocked(2), isFalse);
     });
   });
 }
