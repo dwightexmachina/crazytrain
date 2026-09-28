@@ -16,11 +16,13 @@ class IsoView {
   final double s; // px per cell unit
   final Offset o; // screen offset
   final Game game;
-  const IsoView(this.s, this.o, this.game);
+  final int rot; // camera rotation in 90° steps, 0..3
+  const IsoView(this.s, this.o, this.game, this.rot);
 
-  factory IsoView.fit(Size size, Game game) {
-    final cd = game.cols.toDouble(), rd = game.rows.toDouble();
-    // Iso extents of the board rectangle.
+  factory IsoView.fit(Size size, Game game, {int rot = 0}) {
+    // View-space extents swap on odd rotations.
+    final cd = (rot.isOdd ? game.rows : game.cols).toDouble();
+    final rd = (rot.isOdd ? game.cols : game.rows).toDouble();
     final w = Iso.kx * (cd + rd);
     final h = Iso.ky * (cd + rd);
     const headroom = 2.2; // building heights and peaks above, slab below
@@ -31,17 +33,43 @@ class IsoView {
       size.width / 2 - (minX + maxX) / 2 * s,
       size.height / 2 - (minY + maxY) / 2 * s + 0.45 * s,
     );
-    return IsoView(s, o, game);
+    return IsoView(s, o, game, rot);
   }
 
   /// The whole-board fit, then zoomed around the screen center and panned.
-  factory IsoView.of(Size size, Game game, double zoom, Offset pan) {
-    final base = IsoView.fit(size, game);
+  factory IsoView.of(Size size, Game game, double zoom, Offset pan,
+      {int rot = 0}) {
+    final base = IsoView.fit(size, game, rot: rot);
     final center = Offset(size.width, size.height) / 2;
-    return IsoView(base.s * zoom, center + (base.o - center) * zoom + pan, game);
+    return IsoView(
+        base.s * zoom, center + (base.o - center) * zoom + pan, game, rot);
   }
 
-  Offset pt(double x, double y, [double z = 0]) => o + Iso.p(x, y, z) * s;
+  /// World plane -> view plane: the board turned in 90° steps.
+  Offset viewXY(double x, double y) => switch (rot & 3) {
+        1 => Offset(game.rows - y, x),
+        2 => Offset(game.cols - x, game.rows - y),
+        3 => Offset(y, game.cols - x),
+        _ => Offset(x, y),
+      };
+
+  Offset _worldXY(Offset v) => switch (rot & 3) {
+        1 => Offset(v.dy, game.rows - v.dx),
+        2 => Offset(game.cols - v.dx, game.rows - v.dy),
+        3 => Offset(game.cols - v.dy, v.dx),
+        _ => v,
+      };
+
+  /// Painter's depth: larger is nearer the camera in the current rotation.
+  double depthKey(double x, double y) {
+    final w = viewXY(x, y);
+    return w.dx + w.dy;
+  }
+
+  Offset pt(double x, double y, [double z = 0]) {
+    final w = viewXY(x, y);
+    return o + Iso.p(w.dx, w.dy, z) * s;
+  }
 
   /// Ground screen point: plane position lifted by the terrain underneath.
   Offset gpt(double x, double y, [double dz = 0]) =>
@@ -57,27 +85,29 @@ class IsoView {
   }
 
   /// Screen position -> cell on elevated terrain, or null when outside the
-  /// board. Front-to-back search: the tile nearest the camera wins, so a
-  /// hill's face claims taps over the cells it hides.
+  /// board. Of every cell whose quad contains the point, the one nearest the
+  /// camera wins, so a hill's face claims taps over the cells it hides.
   Cell? cellAt(Offset screen) {
     final hf = game.heights;
-    for (var sum = game.cols + game.rows - 2; sum >= 0; sum--) {
-      final xMin = math.max(0, sum - game.rows + 1);
-      final xMax = math.min(game.cols - 1, sum);
-      for (var x = xMin; x <= xMax; x++) {
-        final y = sum - x;
+    Cell? best;
+    var bestKey = double.negativeInfinity;
+    for (var x = 0; x < game.cols; x++) {
+      for (var y = 0; y < game.rows; y++) {
         final c = Cell(x, y);
+        final key = depthKey(x + 0.5, y + 0.5);
+        if (key <= bestKey) continue;
         final (a, b, d, e) = hf.corners(c);
         final q0 = pt(x.toDouble(), y.toDouble(), a * kZStep);
         final q1 = pt(x + 1.0, y.toDouble(), b * kZStep);
         final q2 = pt(x + 1.0, y + 1.0, d * kZStep);
         final q3 = pt(x.toDouble(), y + 1.0, e * kZStep);
         if (_inTri(screen, q0, q1, q3) || _inTri(screen, q1, q2, q3)) {
-          return c;
+          best = c;
+          bestKey = key;
         }
       }
     }
-    return null;
+    return best;
   }
 
   /// Approximate in-cell fraction (0..1, 0..1) of a screen point, using the
@@ -85,7 +115,7 @@ class IsoView {
   /// nearest corner vertex for terraforming.
   Offset fracIn(Cell c, Offset screen) {
     final z = game.heights.centerZ(c) * kZStep;
-    final p = Iso.unp((screen - o) / s + Offset(0, z));
+    final p = _worldXY(Iso.unp((screen - o) / s + Offset(0, z)));
     return Offset(
       (p.dx - c.x).clamp(0.0, 1.0),
       (p.dy - c.y).clamp(0.0, 1.0),
@@ -102,13 +132,27 @@ void _face(Canvas c, Color color, List<Offset> pts) {
 
 /// Iso box with footprint centered at plane (cx, cy), footprint w×d cell
 /// units, height h cell units, sitting at base height z0 (cell units).
+/// The two side faces toward the camera depend on the view rotation.
 void drawBox(Canvas c, IsoView v, double cx, double cy, double w, double d,
     double h, (Color, Color, Color) col, [double z0 = 0]) {
   final x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - d / 2, y1 = cy + d / 2;
   final zt = z0 + h;
   _face(c, col.$1, [v.pt(x0, y0, zt), v.pt(x1, y0, zt), v.pt(x1, y1, zt), v.pt(x0, y1, zt)]);
-  _face(c, col.$2, [v.pt(x0, y1, zt), v.pt(x1, y1, zt), v.pt(x1, y1, z0), v.pt(x0, y1, z0)]);
-  _face(c, col.$3, [v.pt(x1, y0, zt), v.pt(x1, y1, zt), v.pt(x1, y1, z0), v.pt(x1, y0, z0)]);
+  List<Offset> wall(String f) => switch (f) {
+        'y0' => [v.pt(x0, y0, zt), v.pt(x1, y0, zt), v.pt(x1, y0, z0), v.pt(x0, y0, z0)],
+        'y1' => [v.pt(x0, y1, zt), v.pt(x1, y1, zt), v.pt(x1, y1, z0), v.pt(x0, y1, z0)],
+        'x0' => [v.pt(x0, y0, zt), v.pt(x0, y1, zt), v.pt(x0, y1, z0), v.pt(x0, y0, z0)],
+        _ => [v.pt(x1, y0, zt), v.pt(x1, y1, zt), v.pt(x1, y1, z0), v.pt(x1, y0, z0)],
+      };
+  // (view-southwest face, view-southeast face) per rotation step.
+  final (sw, se) = switch (v.rot & 3) {
+    1 => ('x1', 'y0'),
+    2 => ('y0', 'x0'),
+    3 => ('x0', 'y1'),
+    _ => ('y1', 'x1'),
+  };
+  _face(c, col.$2, wall(sw));
+  _face(c, col.$3, wall(se));
 }
 
 void drawShadow(Canvas c, IsoView v, double cx, double cy, double r,
@@ -393,11 +437,13 @@ class StaticBoardPainter extends CustomPainter {
   final int rev;
   final double zoom;
   final Offset pan;
-  StaticBoardPainter(this.game, this.zoom, this.pan) : rev = game.structureRev;
+  final int rot;
+  StaticBoardPainter(this.game, this.zoom, this.pan, this.rot)
+      : rev = game.structureRev;
 
   @override
   void paint(Canvas c, Size size) {
-    final v = IsoView.of(size, game, zoom, pan);
+    final v = IsoView.of(size, game, zoom, pan, rot: rot);
     final hf = game.heights;
 
     // Buildings and decorative trees by cell, for the interleaved pass.
@@ -412,20 +458,29 @@ class StaticBoardPainter extends CustomPainter {
       ..strokeWidth = 1
       ..color = Pal.grid;
 
-    // One back-to-front pass: ground, then whatever sits on the cell.
-    for (var sum = 0; sum <= game.cols + game.rows - 2; sum++) {
-      final xMin = math.max(0, sum - game.rows + 1);
-      final xMax = math.min(game.cols - 1, sum);
-      for (var x = xMin; x <= xMax; x++) {
-        final y = sum - x;
-        final cell = Cell(x, y);
+    // One back-to-front pass in VIEW order: ground, then whatever sits on
+    // the cell. The order depends on the camera rotation.
+    final cells = <Cell>[
+      for (var x = 0; x < game.cols; x++)
+        for (var y = 0; y < game.rows; y++) Cell(x, y),
+    ]..sort((a, b) => v
+        .depthKey(a.x + 0.5, a.y + 0.5)
+        .compareTo(v.depthKey(b.x + 0.5, b.y + 0.5)));
+    for (final cell in cells) {
+      {
+        final x = cell.x, y = cell.y;
         final (ha, hb, hd, he) = hf.corners(cell);
         final xd = x.toDouble(), yd = y.toDouble();
         final tri1 = [(xd, yd, ha.toDouble()), (xd + 1, yd, hb.toDouble()), (xd, yd + 1, he.toDouble())];
         final tri2 = [(xd + 1, yd, hb.toDouble()), (xd + 1, yd + 1, hd.toDouble()), (xd, yd + 1, he.toDouble())];
         for (final tri in [tri1, tri2]) {
           final th = (tri[0].$3 + tri[1].$3 + tri[2].$3) / 3;
-          _face(c, _shadeTri(_groundColor(th), tri),
+          // Shade in VIEW space so slopes relight as the camera rotates.
+          final viewTri = [
+            for (final p in tri)
+              (v.viewXY(p.$1, p.$2).dx, v.viewXY(p.$1, p.$2).dy, p.$3),
+          ];
+          _face(c, _shadeTri(_groundColor(th), viewTri),
               [for (final p in tri) v.pt(p.$1, p.$2, p.$3 * kZStep)]);
         }
 
@@ -499,31 +554,59 @@ class StaticBoardPainter extends CustomPainter {
       }
     }
 
-    // Slab skirts along the south and east edges, following the terrain lip.
+    // Slab skirts along the two camera-facing board edges: which world
+    // edges those are depends on the rotation.
     const slabZ = -0.6;
-    final south = <Offset>[
-      for (var x = 0; x <= game.cols; x++)
-        v.pt(x.toDouble(), game.rows.toDouble(), hf.vAt(x, game.rows) * kZStep),
-    ];
-    _face(c, const Color(0xFFDCD3C0), [
-      ...south,
-      v.pt(game.cols.toDouble(), game.rows.toDouble(), slabZ),
-      v.pt(0, game.rows.toDouble(), slabZ),
-    ]);
-    final east = <Offset>[
-      for (var y = game.rows; y >= 0; y--)
-        v.pt(game.cols.toDouble(), y.toDouble(), hf.vAt(game.cols, y) * kZStep),
-    ];
-    _face(c, const Color(0xFFE5DCCA), [
-      ...east,
-      v.pt(game.cols.toDouble(), 0, slabZ),
-      v.pt(game.cols.toDouble(), game.rows.toDouble(), slabZ),
-    ]);
+    void skirt(String edge, Color color) {
+      final pts = <Offset>[];
+      Offset first, last;
+      switch (edge) {
+        case 'south':
+          for (var x = 0; x <= game.cols; x++) {
+            pts.add(v.pt(x.toDouble(), game.rows.toDouble(),
+                hf.vAt(x, game.rows) * kZStep));
+          }
+          first = v.pt(game.cols.toDouble(), game.rows.toDouble(), slabZ);
+          last = v.pt(0, game.rows.toDouble(), slabZ);
+        case 'north':
+          for (var x = 0; x <= game.cols; x++) {
+            pts.add(v.pt(x.toDouble(), 0, hf.vAt(x, 0) * kZStep));
+          }
+          first = v.pt(game.cols.toDouble(), 0, slabZ);
+          last = v.pt(0, 0, slabZ);
+        case 'east':
+          for (var y = 0; y <= game.rows; y++) {
+            pts.add(v.pt(game.cols.toDouble(), y.toDouble(),
+                hf.vAt(game.cols, y) * kZStep));
+          }
+          first = v.pt(game.cols.toDouble(), game.rows.toDouble(), slabZ);
+          last = v.pt(game.cols.toDouble(), 0, slabZ);
+        default: // west
+          for (var y = 0; y <= game.rows; y++) {
+            pts.add(v.pt(0, y.toDouble(), hf.vAt(0, y) * kZStep));
+          }
+          first = v.pt(0, game.rows.toDouble(), slabZ);
+          last = v.pt(0, 0, slabZ);
+      }
+      _face(c, color, [...pts, first, last]);
+    }
+
+    final (swEdge, seEdge) = switch (rot & 3) {
+      1 => ('east', 'north'),
+      2 => ('north', 'west'),
+      3 => ('west', 'south'),
+      _ => ('south', 'east'),
+    };
+    skirt(swEdge, const Color(0xFFDCD3C0));
+    skirt(seEdge, const Color(0xFFE5DCCA));
   }
 
   @override
   bool shouldRepaint(StaticBoardPainter old) =>
-      old.rev != game.structureRev || old.zoom != zoom || old.pan != pan;
+      old.rev != game.structureRev ||
+      old.zoom != zoom ||
+      old.pan != pan ||
+      old.rot != rot;
 }
 
 // ---------------------------------------------------------------- dynamic
@@ -534,12 +617,13 @@ class DynamicPainter extends CustomPainter {
   final ValueNotifier<Cell?> hover;
   final ValueNotifier<double> zoom;
   final ValueNotifier<Offset> pan;
-  DynamicPainter(this.game, this.plan, this.hover, this.zoom, this.pan)
-      : super(repaint: Listenable.merge([game, plan, hover, zoom, pan]));
+  final ValueNotifier<int> rot;
+  DynamicPainter(this.game, this.plan, this.hover, this.zoom, this.pan, this.rot)
+      : super(repaint: Listenable.merge([game, plan, hover, zoom, pan, rot]));
 
   @override
   void paint(Canvas c, Size size) {
-    final v = IsoView.of(size, game, zoom.value, pan.value);
+    final v = IsoView.of(size, game, zoom.value, pan.value, rot: rot.value);
     final hf = game.heights;
 
     // Hover cell highlight (build tools only), draped over the terrain.
@@ -606,7 +690,7 @@ class DynamicPainter extends CustomPainter {
       final px = cow.cell.x + 0.5, py = cow.cell.y + 0.5;
       final z = hf.centerZ(cow.cell) * kZStep;
       actors.add((px, py));
-      items.add((px + py, () => drawCow(c, v, px, py, z)));
+      items.add((v.depthKey(px, py), () => drawCow(c, v, px, py, z)));
     }
     final path = game.renderPath;
     final len = (path ?? const <PathStep>[]).length.toDouble();
@@ -649,7 +733,7 @@ class DynamicPainter extends CustomPainter {
       final horiz = math.cos(heading).abs() > math.sin(heading).abs();
       final w = horiz ? 0.68 : 0.34, d = horiz ? 0.34 : 0.68;
       actors.add((px, py));
-      items.add((px + py, () {
+      items.add((v.depthKey(px, py), () {
         drawShadow(c, v, px, py, st.flyTo != null ? 0.2 : 0.3, groundZ);
         if (isEngine) {
           drawBox(c, v, px, py, w, d, 0.3, Pal.engine, 0.04 + z);
@@ -683,12 +767,12 @@ class DynamicPainter extends CustomPainter {
       for (final cell in near) {
         final t = treeAt[cell];
         if (t != null) {
-          items.add((t.$1 + t.$2,
+          items.add((v.depthKey(t.$1, t.$2),
               () => drawTree(c, v, t.$1, t.$2, t.$3, hf.centerZ(cell) * kZStep)));
         }
         final b = buildingAt[cell];
         if (b != null) {
-          items.add((b.cell.x + b.cell.y + 1.0,
+          items.add((v.depthKey(b.cell.x + 0.5, b.cell.y + 0.5),
               () => drawBuilding(c, v, b, hf.floorOf(b.cell) * kZStep)));
         }
       }

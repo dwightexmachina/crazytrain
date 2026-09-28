@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import '../model/game.dart';
 import '../model/track.dart';
 import 'painters.dart';
+import 'palette.dart';
 
 /// The isometric board: static cached layer + dynamic layer, plus all
 /// pointer handling (drag-to-lay track, tap-place buildings, bulldoze).
@@ -27,11 +28,15 @@ class _BoardViewState extends State<BoardView>
   final ValueNotifier<TrackPlan?> _plan = ValueNotifier(null);
   final ValueNotifier<Cell?> _hover = ValueNotifier(null);
 
-  // Camera: whole-board fit at zoom 1, scroll to zoom, drag (no tool) to pan.
+  // Camera: whole-board fit at zoom 1, scroll/pinch to zoom, drag (no tool)
+  // to pan, 90°-step rotation.
   final ValueNotifier<double> _zoom = ValueNotifier(1);
   final ValueNotifier<Offset> _pan = ValueNotifier(Offset.zero);
+  final ValueNotifier<int> _rot = ValueNotifier(0);
   bool _panning = false;
   Offset? _lastPanPos;
+  double _pzStartZoom = 1;
+  Offset _pzLastPan = Offset.zero;
 
   Game get game => widget.game;
 
@@ -58,6 +63,7 @@ class _BoardViewState extends State<BoardView>
     _hover.dispose();
     _zoom.dispose();
     _pan.dispose();
+    _rot.dispose();
     super.dispose();
   }
 
@@ -70,7 +76,7 @@ class _BoardViewState extends State<BoardView>
   bool _pointerActive = false;
 
   IsoView _view(Size size) =>
-      IsoView.of(size, game, _zoom.value, _pan.value);
+      IsoView.of(size, game, _zoom.value, _pan.value, rot: _rot.value);
 
   // Last sculpted vertex, so drag-sculpting fires once per vertex.
   (int, int)? _lastSculpt;
@@ -97,16 +103,14 @@ class _BoardViewState extends State<BoardView>
     return Offset(p.dx.clamp(-limX, limX), p.dy.clamp(-limY, limY));
   }
 
-  void _onScroll(PointerScrollEvent e) {
+  /// Zoom to [target], keeping the plane point under [cursor] fixed.
+  void _applyZoom(double target, Offset cursor) {
     final size = context.size!;
     final oldZoom = _zoom.value;
-    final newZoom =
-        (oldZoom * math.exp(-e.scrollDelta.dy / 400)).clamp(1.0, 4.0);
+    final newZoom = target.clamp(1.0, 4.0);
     if (newZoom == oldZoom) return;
-    // Keep the plane point under the cursor fixed while zooming.
-    final base = IsoView.fit(size, game);
+    final base = IsoView.fit(size, game, rot: _rot.value);
     final center = Offset(size.width, size.height) / 2;
-    final cursor = e.localPosition;
     final oldO = center + (base.o - center) * oldZoom + _pan.value;
     final planePx = (cursor - oldO) / (base.s * oldZoom); // iso px per s=1
     var pan =
@@ -115,6 +119,14 @@ class _BoardViewState extends State<BoardView>
     _zoom.value = newZoom;
     _pan.value = _clampPan(pan);
     _hover.value = _cellAt(cursor);
+  }
+
+  void _onScroll(PointerScrollEvent e) =>
+      _applyZoom(_zoom.value * math.exp(-e.scrollDelta.dy / 400), e.localPosition);
+
+  void _rotate(int dir) {
+    _rot.value = (_rot.value + dir) & 3;
+    _pan.value = Offset.zero; // recenter: a spun world off-screen disorients
   }
 
   void _pointerDown(Offset local) {
@@ -253,6 +265,28 @@ class _BoardViewState extends State<BoardView>
     if (err != null) _notice(err);
   }
 
+  Offset _screenCenter() {
+    final size = context.size!;
+    return Offset(size.width / 2, size.height / 2);
+  }
+
+  Widget _camBtn(IconData icon, String tip, VoidCallback onTap) => Tooltip(
+        message: tip,
+        child: Material(
+          color: Pal.chromeBg,
+          shape: const CircleBorder(side: BorderSide(color: Pal.chromeLine)),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox(
+              width: 34,
+              height: 34,
+              child: Icon(icon, size: 18, color: Pal.muted),
+            ),
+          ),
+        ),
+      );
+
   void _notice(String msg) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -278,16 +312,33 @@ class _BoardViewState extends State<BoardView>
         onPointerUp: (e) => _pointerUp(e.localPosition),
         onPointerCancel: (e) => _pointerUp(e.position),
         onPointerSignal: (e) {
-          if (e is PointerScrollEvent) _onScroll(e);
+          if (e is PointerScrollEvent) {
+            _onScroll(e);
+          } else if (e is PointerScaleEvent) {
+            // Browser trackpad pinch arrives as a scale signal.
+            _applyZoom(_zoom.value * e.scale, e.localPosition);
+          }
+        },
+        onPointerPanZoomStart: (e) {
+          _pzStartZoom = _zoom.value;
+          _pzLastPan = Offset.zero;
+        },
+        onPointerPanZoomUpdate: (e) {
+          // Desktop trackpad gesture stream: two-finger pan + pinch zoom.
+          final d = e.pan - _pzLastPan;
+          _pzLastPan = e.pan;
+          _pan.value = _clampPan(_pan.value + d);
+          _applyZoom(_pzStartZoom * e.scale, e.localPosition);
         },
         child: Stack(
           fit: StackFit.expand,
           children: [
             RepaintBoundary(
               child: ListenableBuilder(
-                listenable: Listenable.merge([game, _zoom, _pan]),
+                listenable: Listenable.merge([game, _zoom, _pan, _rot]),
                 builder: (context, child) => CustomPaint(
-                  painter: StaticBoardPainter(game, _zoom.value, _pan.value),
+                  painter: StaticBoardPainter(
+                      game, _zoom.value, _pan.value, _rot.value),
                   isComplex: true,
                   willChange: false,
                 ),
@@ -295,8 +346,27 @@ class _BoardViewState extends State<BoardView>
             ),
             RepaintBoundary(
               child: CustomPaint(
-                painter: DynamicPainter(game, _plan, _hover, _zoom, _pan),
+                painter: DynamicPainter(game, _plan, _hover, _zoom, _pan, _rot),
                 willChange: true,
+              ),
+            ),
+            Positioned(
+              left: 12,
+              bottom: 12,
+              child: Column(
+                children: [
+                  _camBtn(Icons.add_rounded, 'Zoom in',
+                      () => _applyZoom(_zoom.value * 1.3, _screenCenter())),
+                  const SizedBox(height: 6),
+                  _camBtn(Icons.remove_rounded, 'Zoom out',
+                      () => _applyZoom(_zoom.value / 1.3, _screenCenter())),
+                  const SizedBox(height: 6),
+                  _camBtn(Icons.rotate_left_rounded, 'Rotate left',
+                      () => _rotate(-1)),
+                  const SizedBox(height: 6),
+                  _camBtn(Icons.rotate_right_rounded, 'Rotate right',
+                      () => _rotate(1)),
+                ],
               ),
             ),
           ],

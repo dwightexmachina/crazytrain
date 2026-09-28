@@ -561,6 +561,24 @@ void main() {
     });
   });
 
+  group('camera', () {
+    test('cellAt round-trips cell centers under every rotation', () {
+      final g = flatGame();
+      g.balance = 1000;
+      // Include some elevation so picking isn't trivially planar.
+      g.sculpt(const Cell(8, 0), const Offset(0.2, 0.2), 1);
+      const size = Size(900, 700);
+      for (var rot = 0; rot < 4; rot++) {
+        final v = IsoView.fit(size, g, rot: rot);
+        for (final cell in const [Cell(0, 0), Cell(5, 3), Cell(15, 11)]) {
+          final z = g.heights.centerZ(cell) * kZStep;
+          final screen = v.pt(cell.x + 0.5, cell.y + 0.5, z);
+          expect(v.cellAt(screen), cell, reason: 'rot $rot, $cell');
+        }
+      }
+    });
+  });
+
   group('board pointer input', () {
     testWidgets('a fast drag lays track including the very first cell',
         (tester) async {
