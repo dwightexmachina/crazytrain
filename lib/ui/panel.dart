@@ -78,7 +78,8 @@ class _ShopItem {
 
 class ShopPanel extends StatefulWidget {
   final Game game;
-  const ShopPanel({super.key, required this.game});
+  final VoidCallback? onExitToMap;
+  const ShopPanel({super.key, required this.game, this.onExitToMap});
 
   @override
   State<ShopPanel> createState() => _ShopPanelState();
@@ -333,6 +334,10 @@ class _ShopPanelState extends State<ShopPanel> {
               _controlsRow(),
               const SizedBox(height: 10),
               _balanceCard(),
+              if (game.scenario != null) ...[
+                const SizedBox(height: 8),
+                _missionsCard(),
+              ],
               const SizedBox(height: 12),
               _sectionLabel('TOOLS'),
               _grid(_tools()),
@@ -383,13 +388,28 @@ class _ShopPanelState extends State<ShopPanel> {
                 const Icon(Icons.train_rounded, size: 18, color: Colors.white),
           ),
           const SizedBox(width: 8),
-          const Expanded(
-            child: Text('Crazy Train',
+          Expanded(
+            child: Text(game.scenario?.name ?? 'Crazy Train',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: 15.5,
+                    fontSize: game.scenario == null ? 15.5 : 12.5,
                     fontWeight: FontWeight.w800,
                     color: Pal.ink)),
           ),
+          if (widget.onExitToMap != null)
+            Tooltip(
+              message: 'Route map',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(13),
+                onTap: widget.onExitToMap,
+                child: const SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: Icon(Icons.map_rounded, size: 16, color: Pal.faint),
+                ),
+              ),
+            ),
           Tooltip(
             message: 'Start over',
             child: InkWell(
@@ -546,6 +566,57 @@ class _ShopPanelState extends State<ShopPanel> {
           ],
         ),
       );
+
+  Widget _missionsCard() {
+    final sc = game.scenario!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: Pal.card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Pal.chromeLine),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('MISSIONS',
+              style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.3,
+                  color: Pal.faint)),
+          const SizedBox(height: 4),
+          for (final m in sc.missions)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('★',
+                      style: TextStyle(
+                          fontSize: 12,
+                          height: 1.1,
+                          color: game.missionsDone.contains(m.id)
+                              ? Pal.accent
+                              : Pal.accent.withValues(alpha: 0.25))),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(m.title,
+                        style: TextStyle(
+                            fontSize: 10.5,
+                            height: 1.3,
+                            fontWeight: FontWeight.w700,
+                            color: game.missionsDone.contains(m.id)
+                                ? Pal.faint
+                                : Pal.ink)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _hintCard() {
     final String hint = switch (game.tool) {

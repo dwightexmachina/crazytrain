@@ -23,6 +23,19 @@ Game flatGame() {
   return g;
 }
 
+/// Boot the app, dismiss the splash, and board the sandbox from the map.
+Future<void> enterSandbox(WidgetTester tester) async {
+  web.window.localStorage.clear();
+  await tester.pumpWidget(const TrainMakerApp());
+  await tester.pump();
+  await tester.tap(find.text('TAP TO ROLL'));
+  for (var i = 0; i < 12; i++) {
+    await tester.pump(const Duration(milliseconds: 60)); // splash fade
+  }
+  await tester.tap(find.text('SANDBOX'));
+  await tester.pump();
+}
+
 /// Sink one cell below the water table by hand.
 void sink(Game g, Cell c) {
   for (final (vx, vy) in [(c.x, c.y), (c.x + 1, c.y), (c.x + 1, c.y + 1), (c.x, c.y + 1)]) {
@@ -614,7 +627,7 @@ void main() {
   });
 
   group('tool selection', () {
-    testWidgets('splash shows on boot and a tap rolls into the game',
+    testWidgets('splash shows on boot and a tap rolls to the route map',
         (tester) async {
       web.window.localStorage.clear();
       await tester.pumpWidget(const TrainMakerApp());
@@ -625,12 +638,11 @@ void main() {
         await tester.pump(const Duration(milliseconds: 60)); // fade out
       }
       expect(find.text('TAP TO ROLL'), findsNothing);
+      expect(find.text('CHOOSE YOUR LINE'), findsOneWidget);
     });
 
     testWidgets('Esc deselects the active tool', (tester) async {
-      web.window.localStorage.clear();
-      await tester.pumpWidget(const TrainMakerApp());
-      await tester.pump();
+      await enterSandbox(tester);
       final view =
           tester.widget<BoardView>(find.byType(BoardView));
       view.game.setTool(Tool.track);
@@ -640,9 +652,7 @@ void main() {
 
     testWidgets('the "=" / "+" dev cheat grants money by character',
         (tester) async {
-      web.window.localStorage.clear();
-      await tester.pumpWidget(const TrainMakerApp());
-      await tester.pump();
+      await enterSandbox(tester);
       final game = tester.widget<BoardView>(find.byType(BoardView)).game;
       final before = game.balance;
       await tester.sendKeyDownEvent(LogicalKeyboardKey.equal, character: '=');
@@ -1027,6 +1037,77 @@ void main() {
       ScenarioProgress.markDone('prairie', 'nest-egg');
       expect(ScenarioProgress.unlocked(1), isTrue);
       expect(ScenarioProgress.unlocked(2), isFalse);
+    });
+  });
+
+  group('route map', () {
+    Future<void> toMap(WidgetTester tester) async {
+      await tester.pumpWidget(const TrainMakerApp());
+      await tester.pump();
+      await tester.tap(find.text('TAP TO ROLL'));
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+    }
+
+    testWidgets('locked stops show as locked, first stop boards',
+        (tester) async {
+      web.window.localStorage.clear();
+      await toMap(tester);
+      // Prairie is the frontier: its panel is open with ALL ABOARD.
+      expect(find.text('ALL ABOARD'), findsOneWidget);
+      // The Gorge is locked: tapping its plate shows the locked panel.
+      await tester.tap(find.text('THE GORGE'));
+      await tester.pump();
+      expect(find.text('ALL ABOARD'), findsNothing);
+      expect(find.textContaining('Earn a star at the previous stop'),
+          findsOneWidget);
+      // Boarding Prairie Junction lands in its scenario game.
+      await tester.tap(find.text('PRAIRIE JUNCTION'));
+      await tester.pump();
+      await tester.tap(find.text('ALL ABOARD'));
+      await tester.pump();
+      final game = tester.widget<BoardView>(find.byType(BoardView)).game;
+      expect(game.scenario?.id, 'prairie');
+      expect(find.text('MISSIONS'), findsOneWidget);
+    });
+
+    testWidgets('route map button exits via confirm and keeps the save',
+        (tester) async {
+      web.window.localStorage.clear();
+      await toMap(tester);
+      await tester.tap(find.text('ALL ABOARD'));
+      await tester.pump();
+      expect(find.byType(BoardView), findsOneWidget);
+      // The board ticker never settles, so pump fixed frames instead.
+      Future<void> settle() async {
+        for (var i = 0; i < 6; i++) {
+          await tester.pump(const Duration(milliseconds: 80));
+        }
+      }
+
+      await tester.tap(find.byIcon(Icons.map_rounded));
+      await settle();
+      expect(find.text('Return to the route map?'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await settle();
+      expect(find.byType(BoardView), findsOneWidget, reason: 'cancel stays');
+      await tester.tap(find.byIcon(Icons.map_rounded));
+      await settle();
+      await tester.tap(find.text('Route map'));
+      await settle();
+      expect(find.text('CHOOSE YOUR LINE'), findsOneWidget);
+      expect(Game.hasSaveFor('prairie'), isTrue);
+      // Its panel now offers to resume the world in progress.
+      expect(find.text('RESUME'), findsOneWidget);
+      expect(find.text('Start fresh'), findsOneWidget);
+    });
+
+    testWidgets('the roundhouse boards the sandbox', (tester) async {
+      await enterSandbox(tester);
+      final game = tester.widget<BoardView>(find.byType(BoardView)).game;
+      expect(game.scenario, isNull);
+      expect(find.text('MISSIONS'), findsNothing);
     });
   });
 }
