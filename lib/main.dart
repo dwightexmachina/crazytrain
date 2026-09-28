@@ -35,9 +35,8 @@ class _TrainMakerAppState extends State<TrainMakerApp> {
         bindings: {
           const SingleActivator(LogicalKeyboardKey.escape): () =>
               game.setTool(Tool.none),
-          const SingleActivator(LogicalKeyboardKey.equal, shift: true):
-              game.devGrant,
-          const SingleActivator(LogicalKeyboardKey.numpadAdd): game.devGrant,
+          const CharacterActivator('+'): game.devGrant,
+          const CharacterActivator('='): game.devGrant,
         },
         child: Focus(
           autofocus: true,

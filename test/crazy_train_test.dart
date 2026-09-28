@@ -559,6 +559,21 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       expect(view.game.tool, Tool.none);
     });
+
+    testWidgets('the "=" / "+" dev cheat grants money by character',
+        (tester) async {
+      web.window.localStorage.clear();
+      await tester.pumpWidget(const TrainMakerApp());
+      await tester.pump();
+      final game = tester.widget<BoardView>(find.byType(BoardView)).game;
+      final before = game.balance;
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.equal, character: '=');
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.equal);
+      expect(game.balance, before + 200);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.equal, character: '+');
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.equal);
+      expect(game.balance, before + 400);
+    });
   });
 
   group('tunnels', () {
