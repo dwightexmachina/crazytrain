@@ -166,6 +166,32 @@ class _SpeedControls extends StatelessWidget {
 
 // ---------------------------------------------------------------- shop
 
+/// One entry in the compact icon grid, with its hover-popover content.
+class _ShopItem {
+  final IconData icon;
+  final String title;
+  final String desc;
+  final String tag; // micro-label under the icon
+  final String? chip; // price chip in the popover
+  final bool chipMuted;
+  final bool enabled;
+  final bool selected;
+  final bool danger;
+  final VoidCallback? onTap;
+  const _ShopItem({
+    required this.icon,
+    required this.title,
+    required this.desc,
+    required this.tag,
+    this.chip,
+    this.chipMuted = false,
+    this.enabled = true,
+    this.selected = false,
+    this.danger = false,
+    this.onTap,
+  });
+}
+
 class ShopPanel extends StatefulWidget {
   final Game game;
   const ShopPanel({super.key, required this.game});
@@ -185,10 +211,190 @@ class _ShopPanelState extends State<ShopPanel> {
     super.dispose();
   }
 
+  String _money(int p) =>
+      p >= 1000 ? '\$${(p / 1000).toStringAsFixed(1)}k' : '\$$p';
+
+  _ShopItem _toolItem({
+    required Tool tool,
+    required IconData icon,
+    required String title,
+    required String desc,
+    required String tag,
+    String? chip,
+    bool enabled = true,
+    bool danger = false,
+  }) =>
+      _ShopItem(
+        icon: icon,
+        title: title,
+        desc: desc,
+        tag: tag,
+        chip: chip,
+        enabled: enabled,
+        danger: danger,
+        selected: game.tool == tool,
+        onTap: () => game.setTool(tool),
+      );
+
+  List<_ShopItem> _tools() => [
+        _toolItem(
+          tool: Tool.none,
+          icon: Icons.near_me_rounded,
+          title: 'Select',
+          tag: 'SELECT',
+          desc:
+              'Flip switches by tapping them · drag to pan, scroll to zoom. Esc returns here.',
+        ),
+        _toolItem(
+          tool: Tool.track,
+          icon: Icons.route_rounded,
+          title: 'Track',
+          tag: '\$10+',
+          chip: '\$10+',
+          enabled: game.balance >= Game.priceStraight,
+          desc:
+              'Drag across the board. \$${Game.priceStraight} straight · \$${Game.priceCurve} curve · +\$${Game.priceBridge} bridge over water. Straights climb one step per cell.',
+        ),
+        _toolItem(
+          tool: Tool.bulldoze,
+          icon: Icons.construction_rounded,
+          title: 'Bulldoze',
+          tag: 'RAZE',
+          danger: true,
+          desc: 'Remove track or buildings · 50% refund.',
+        ),
+        const _ShopItem(
+          icon: Icons.schedule_rounded,
+          title: 'Tunnels',
+          tag: 'SOON',
+          chip: 'soon',
+          chipMuted: true,
+          enabled: false,
+          desc: 'Next feature — bores through the mountains you sculpt.',
+        ),
+      ];
+
+  List<_ShopItem> _build() => [
+        _ShopItem(
+          icon: Icons.directions_railway_rounded,
+          title: 'Train car',
+          tag: '\$${Game.priceCar}',
+          chip: '\$${Game.priceCar}',
+          enabled: game.balance >= Game.priceCar,
+          desc: 'Adds a car · bigger payouts every lap.',
+          onTap: game.buyCar,
+        ),
+        _toolItem(
+          tool: Tool.stop,
+          icon: Icons.home_work_rounded,
+          title: BuildingType.stop.label,
+          tag: '\$${BuildingType.stop.price}',
+          chip: '\$${BuildingType.stop.price}',
+          enabled: game.balance >= BuildingType.stop.price,
+          desc:
+              '+\$${BuildingType.stop.bonus} each pass. Tap beside track — uneven ground levels automatically (\$${Game.priceTerraformStep} a step).',
+        ),
+        _toolItem(
+          tool: Tool.depot,
+          icon: Icons.warehouse_rounded,
+          title: BuildingType.depot.label,
+          tag: '\$${BuildingType.depot.price}',
+          chip: '\$${BuildingType.depot.price}',
+          enabled: game.balance >= BuildingType.depot.price,
+          desc:
+              '+\$${BuildingType.depot.bonus} each pass. Tap beside track — levels its site if needed.',
+        ),
+        _toolItem(
+          tool: Tool.launchpad,
+          icon: Icons.rocket_launch_rounded,
+          title: 'Launchpad',
+          tag: '\$${Game.priceLaunchpad}',
+          chip: '\$${Game.priceLaunchpad}',
+          enabled: game.balance >= Game.priceLaunchpad,
+          desc:
+              'A pair of pads — the train flies between them. Tap two clear, flat cells.',
+        ),
+        _toolItem(
+          tool: Tool.switchTrack,
+          icon: Icons.alt_route_rounded,
+          title: 'Switch',
+          tag: '\$${Game.priceSwitch}',
+          chip: '\$${Game.priceSwitch}',
+          enabled: game.balance >= Game.priceSwitch,
+          desc:
+              'Fork the line. Tap flat track, then the side the junction should face. Tap it later (in Select) to flip routes.',
+        ),
+      ];
+
+  List<_ShopItem> _terraform() => [
+        _toolItem(
+          tool: Tool.raiseLand,
+          icon: Icons.terrain_rounded,
+          title: 'Raise land',
+          tag: '\$10/st',
+          chip: '\$${Game.priceTerraformStep} / step',
+          enabled: game.balance >= Game.priceTerraformStep,
+          desc:
+              'Sculpt hills & peaks. Drag to paint; neighbors follow so slopes stay smooth.',
+        ),
+        _toolItem(
+          tool: Tool.lowerLand,
+          icon: Icons.south_west_rounded,
+          title: 'Lower land',
+          tag: '\$10/st',
+          chip: '\$${Game.priceTerraformStep} / step',
+          enabled: game.balance >= Game.priceTerraformStep,
+          desc:
+              'Carve valleys & basins. Dig below the waterline and water floods in — track over water needs a bridge (+\$${Game.priceBridge}).',
+        ),
+        if (game.canExpandEast)
+          _ShopItem(
+            icon: Icons.east_rounded,
+            title: 'Land deed · east',
+            tag: _money(game.deedPrice),
+            chip: '\$${game.deedPrice}',
+            enabled: game.balance >= game.deedPrice,
+            desc:
+                '+${Game.expandStep} columns of frontier, with fresh hills, water and trees. Price rises per deed.',
+            onTap: () => game.buyLand(east: true),
+          )
+        else
+          const _ShopItem(
+            icon: Icons.east_rounded,
+            title: 'Land deed · east',
+            tag: 'MAX',
+            chip: 'claimed',
+            chipMuted: true,
+            enabled: false,
+            desc: 'Frontier fully claimed — the map is at its eastern limit.',
+          ),
+        if (game.canExpandSouth)
+          _ShopItem(
+            icon: Icons.south_rounded,
+            title: 'Land deed · south',
+            tag: _money(game.deedPrice),
+            chip: '\$${game.deedPrice}',
+            enabled: game.balance >= game.deedPrice,
+            desc:
+                '+${Game.expandStep} rows of frontier, with fresh hills, water and trees. Price rises per deed.',
+            onTap: () => game.buyLand(east: false),
+          )
+        else
+          const _ShopItem(
+            icon: Icons.south_rounded,
+            title: 'Land deed · south',
+            tag: 'MAX',
+            chip: 'claimed',
+            chipMuted: true,
+            enabled: false,
+            desc: 'Frontier fully claimed — the map is at its southern limit.',
+          ),
+      ];
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 250,
+      width: 234,
       decoration: const BoxDecoration(
         color: Pal.chromeBg,
         border: Border(left: BorderSide(color: Pal.chromeLine)),
@@ -199,154 +405,51 @@ class _ShopPanelState extends State<ShopPanel> {
           controller: _scroll,
           thumbVisibility: true,
           child: ListView(
-          controller: _scroll,
-          padding: const EdgeInsets.all(14),
-          children: [
-            _balanceCard(),
-            const SizedBox(height: 10),
-            _trainCard(),
-            const SizedBox(height: 16),
-            _toolTile(
-              tool: Tool.none,
-              icon: Icons.near_me_rounded,
-              title: 'Select',
-              subtitle:
-                  'Flip switches by tapping them · drag to pan, scroll to zoom. Esc returns here.',
-              enabled: true,
-            ),
-            const SizedBox(height: 14),
-            _sectionLabel('BUILD'),
-            _toolTile(
-              tool: Tool.track,
-              icon: Icons.route_rounded,
-              title: 'Track',
-              subtitle:
-                  'Drag across the board. \$${Game.priceStraight} straight · \$${Game.priceCurve} curve · +\$${Game.priceBridge} bridge over water',
-              enabled: game.balance >= Game.priceStraight,
-            ),
-            _buyTile(
-              icon: Icons.directions_railway_rounded,
-              title: 'Train car',
-              subtitle: 'Adds a car · bigger payouts',
-              price: Game.priceCar,
-              onBuy: game.buyCar,
-            ),
-            _toolTile(
-              tool: Tool.stop,
-              icon: Icons.home_work_rounded,
-              title: BuildingType.stop.label,
-              subtitle:
-                  '\$${BuildingType.stop.price} · +\$${BuildingType.stop.bonus} each pass. Tap beside track.',
-              enabled: game.balance >= BuildingType.stop.price,
-            ),
-            _toolTile(
-              tool: Tool.depot,
-              icon: Icons.warehouse_rounded,
-              title: BuildingType.depot.label,
-              subtitle:
-                  '\$${BuildingType.depot.price} · +\$${BuildingType.depot.bonus} each pass. Tap beside track.',
-              enabled: game.balance >= BuildingType.depot.price,
-            ),
-            _toolTile(
-              tool: Tool.launchpad,
-              icon: Icons.rocket_launch_rounded,
-              title: 'Launchpad',
-              subtitle:
-                  '\$${Game.priceLaunchpad} a pair · the train flies between pads. Tap two cells.',
-              enabled: game.balance >= Game.priceLaunchpad,
-            ),
-            _toolTile(
-              tool: Tool.switchTrack,
-              icon: Icons.alt_route_rounded,
-              title: 'Switch',
-              subtitle:
-                  '\$${Game.priceSwitch} · fork the line. Tap track, then the side to branch from.',
-              enabled: game.balance >= Game.priceSwitch,
-            ),
-            const SizedBox(height: 14),
-            _sectionLabel('EXPAND'),
-            if (game.canExpandEast)
-              _buyTile(
-                icon: Icons.east_rounded,
-                title: 'Land deed · east',
-                subtitle:
-                    '+${Game.expandStep} columns of frontier · price rises per deed',
-                price: game.deedPrice,
-                onBuy: () => game.buyLand(east: true),
-              )
-            else
-              _lockedTile(
-                icon: Icons.east_rounded,
-                title: 'Land deed · east',
-                subtitle: 'Frontier fully claimed',
-              ),
-            if (game.canExpandSouth)
-              _buyTile(
-                icon: Icons.south_rounded,
-                title: 'Land deed · south',
-                subtitle:
-                    '+${Game.expandStep} rows of frontier · price rises per deed',
-                price: game.deedPrice,
-                onBuy: () => game.buyLand(east: false),
-              )
-            else
-              _lockedTile(
-                icon: Icons.south_rounded,
-                title: 'Land deed · south',
-                subtitle: 'Frontier fully claimed',
-              ),
-            const SizedBox(height: 14),
-            _sectionLabel('TERRAFORM'),
-            _toolTile(
-              tool: Tool.raiseLand,
-              icon: Icons.terrain_rounded,
-              title: 'Raise land',
-              subtitle:
-                  '\$${Game.priceTerraformStep} per step · sculpt hills & peaks. Drag to paint.',
-              enabled: game.balance >= Game.priceTerraformStep,
-            ),
-            _toolTile(
-              tool: Tool.lowerLand,
-              icon: Icons.south_west_rounded,
-              title: 'Lower land',
-              subtitle:
-                  '\$${Game.priceTerraformStep} per step · carve valleys & basins',
-              enabled: game.balance >= Game.priceTerraformStep,
-            ),
-            const SizedBox(height: 14),
-            _sectionLabel('DEMOLISH'),
-            _toolTile(
-              tool: Tool.bulldoze,
-              icon: Icons.construction_rounded,
-              title: 'Bulldoze',
-              subtitle: 'Remove track or buildings · 50% refund',
-              enabled: true,
-              danger: true,
-            ),
-            const SizedBox(height: 14),
-            _hintCard(),
-          ],
+            controller: _scroll,
+            padding: const EdgeInsets.all(12),
+            children: [
+              _balanceCard(),
+              const SizedBox(height: 8),
+              _trainCard(),
+              const SizedBox(height: 12),
+              _sectionLabel('TOOLS'),
+              _grid(_tools()),
+              const SizedBox(height: 10),
+              _sectionLabel('BUILD'),
+              _grid(_build()),
+              const SizedBox(height: 10),
+              _sectionLabel('TERRAFORM'),
+              _grid(_terraform()),
+              const SizedBox(height: 12),
+              _hintCard(),
+            ],
           ),
         ),
       ),
     );
   }
 
+  Widget _grid(List<_ShopItem> items) => Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [for (final it in items) _ShopTile(item: it)],
+      );
+
   Widget _sectionLabel(String s) => Padding(
-        padding: const EdgeInsets.only(bottom: 8, left: 2),
+        padding: const EdgeInsets.only(bottom: 6, left: 2),
         child: Text(s,
             style: const TextStyle(
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 1.4,
+                letterSpacing: 1.3,
                 color: Pal.faint)),
       );
 
   Widget _balanceCard() => Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: Pal.card,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Pal.chromeLine),
         ),
         child: Column(
@@ -354,21 +457,19 @@ class _ShopPanelState extends State<ShopPanel> {
           children: [
             const Text('BALANCE',
                 style: TextStyle(
-                    fontSize: 10.5,
+                    fontSize: 9.5,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 1.4,
+                    letterSpacing: 1.3,
                     color: Pal.faint)),
-            const SizedBox(height: 2),
             Text('\$${game.balance}',
                 style: const TextStyle(
-                    fontSize: 28, fontWeight: FontWeight.w800, color: Pal.ink)),
-            const SizedBox(height: 6),
+                    fontSize: 23, fontWeight: FontWeight.w800, color: Pal.ink)),
             Text(
               game.path == null
                   ? 'No payout — loop is broken'
                   : '≈ \$${game.projectedPayout} per lap',
               style: TextStyle(
-                  fontSize: 12.5,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w600,
                   color: game.path == null ? Pal.bad : Pal.good),
             ),
@@ -377,152 +478,25 @@ class _ShopPanelState extends State<ShopPanel> {
       );
 
   Widget _trainCard() => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         decoration: BoxDecoration(
           color: Pal.chip,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
           children: [
-            const Icon(Icons.train_rounded, size: 18, color: Pal.muted),
-            const SizedBox(width: 8),
+            const Icon(Icons.train_rounded, size: 16, color: Pal.muted),
+            const SizedBox(width: 7),
             Expanded(
               child: Text(
                 '${game.cars} car${game.cars == 1 ? '' : 's'} · ${game.trackLength} track',
                 style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: Pal.ink),
+                    fontSize: 12, fontWeight: FontWeight.w700, color: Pal.ink),
               ),
             ),
           ],
         ),
       );
-
-  Widget _tileShell({
-    required Widget child,
-    required bool enabled,
-    bool selected = false,
-    bool danger = false,
-    VoidCallback? onTap,
-  }) {
-    final borderColor = selected
-        ? (danger ? Pal.bad : Pal.accent)
-        : Pal.chromeLine;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: selected
-            ? (danger
-                ? Pal.bad.withValues(alpha: 0.07)
-                : Pal.accent.withValues(alpha: 0.08))
-            : Pal.card,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: enabled ? onTap : null,
-          child: Container(
-            padding: const EdgeInsets.all(11),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: borderColor, width: selected ? 1.6 : 1),
-            ),
-            child: Opacity(opacity: enabled ? 1 : 0.45, child: child),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _tileRow(IconData icon, String title, String subtitle,
-      {Widget? trailing, Color? iconColor}) {
-    return Row(
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: Pal.chip,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Icon(icon, size: 18, color: iconColor ?? Pal.muted),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 13.5, fontWeight: FontWeight.w800, color: Pal.ink)),
-              const SizedBox(height: 1),
-              Text(subtitle,
-                  style: const TextStyle(
-                      fontSize: 11, height: 1.25, color: Pal.muted)),
-            ],
-          ),
-        ),
-        if (trailing != null) ...[const SizedBox(width: 6), trailing],
-      ],
-    );
-  }
-
-  Widget _toolTile({
-    required Tool tool,
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool enabled,
-    bool danger = false,
-  }) {
-    final selected = game.tool == tool;
-    return _tileShell(
-      enabled: enabled,
-      selected: selected,
-      danger: danger,
-      onTap: () => game.setTool(tool),
-      child: _tileRow(icon, title, subtitle,
-          iconColor: selected ? (danger ? Pal.bad : Pal.accent) : null,
-          trailing: selected
-              ? Icon(Icons.check_circle_rounded,
-                  size: 18, color: danger ? Pal.bad : Pal.accent)
-              : null),
-    );
-  }
-
-  Widget _buyTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required int price,
-    required bool Function() onBuy,
-  }) {
-    final enabled = game.balance >= price;
-    return _tileShell(
-      enabled: enabled,
-      onTap: () => onBuy(),
-      child: _tileRow(icon, title, subtitle,
-          trailing: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: enabled ? Pal.accent : Pal.chip,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text('\$$price',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: enabled ? Colors.white : Pal.faint)),
-          )),
-    );
-  }
-
-  Widget _lockedTile(
-      {required IconData icon, required String title, required String subtitle}) {
-    return _tileShell(
-      enabled: false,
-      child: _tileRow(icon, title, subtitle,
-          trailing: const Icon(Icons.lock_rounded, size: 15, color: Pal.faint)),
-    );
-  }
 
   Widget _hintCard() {
     final String hint = switch (game.tool) {
@@ -543,13 +517,170 @@ class _ShopPanelState extends State<ShopPanel> {
         'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
         color: Pal.chip,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Text(hint,
-          style: const TextStyle(fontSize: 11.5, height: 1.45, color: Pal.muted)),
+          style: const TextStyle(fontSize: 10.5, height: 1.45, color: Pal.muted)),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- tile
+
+class _ShopTile extends StatefulWidget {
+  final _ShopItem item;
+  const _ShopTile({required this.item});
+
+  @override
+  State<_ShopTile> createState() => _ShopTileState();
+}
+
+class _ShopTileState extends State<_ShopTile> {
+  final OverlayPortalController _pop = OverlayPortalController();
+  final LayerLink _link = LayerLink();
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final it = widget.item;
+    final Color accent = it.danger ? Pal.bad : Pal.accent;
+    final Color border = it.selected
+        ? accent
+        : _hover
+            ? accent
+            : Pal.chromeLine;
+    final Color iconColor = it.selected
+        ? accent
+        : _hover
+            ? Pal.ink
+            : Pal.muted;
+    return CompositedTransformTarget(
+      link: _link,
+      child: OverlayPortal(
+        controller: _pop,
+        overlayChildBuilder: (context) => Align(
+          alignment: Alignment.topLeft,
+          child: CompositedTransformFollower(
+            link: _link,
+            showWhenUnlinked: false,
+            targetAnchor: Alignment.centerLeft,
+            followerAnchor: Alignment.centerRight,
+            offset: const Offset(-12, 0),
+            child: _Popover(item: it),
+          ),
+        ),
+        child: MouseRegion(
+          onEnter: (_) {
+            setState(() => _hover = true);
+            _pop.show();
+          },
+          onExit: (_) {
+            setState(() => _hover = false);
+            _pop.hide();
+          },
+          child: GestureDetector(
+            onLongPressStart: (_) => _pop.show(),
+            onLongPressEnd: (_) => _pop.hide(),
+            child: Opacity(
+              opacity: it.enabled ? 1 : 0.42,
+              child: Material(
+                color: it.selected
+                    ? accent.withValues(alpha: 0.10)
+                    : Pal.card,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: it.enabled ? it.onTap : null,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: border, width: it.selected ? 1.6 : 1),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(it.icon, size: 20, color: iconColor),
+                        const SizedBox(height: 1),
+                        Text(it.tag,
+                            style: TextStyle(
+                                fontSize: 8,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.2,
+                                color: it.selected ? accent : Pal.faint)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Popover extends StatelessWidget {
+  final _ShopItem item;
+  const _Popover({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Pal.card,
+      elevation: 8,
+      shadowColor: Pal.ink.withValues(alpha: 0.3),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 196,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Pal.chromeLine),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(item.title,
+                      style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          color: Pal.ink)),
+                ),
+                if (item.chip != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: item.chipMuted ? Pal.chip : Pal.accent,
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: Text(item.chip!,
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color:
+                                item.chipMuted ? Pal.faint : Colors.white)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(item.desc,
+                style: const TextStyle(
+                    fontSize: 10.5, height: 1.45, color: Pal.muted)),
+          ],
+        ),
+      ),
     );
   }
 }
