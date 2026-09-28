@@ -370,15 +370,6 @@ Color _shadeTri((int, int, int) base, List<(double, double, double)> tri) {
 
 // ---------------------------------------------------------------- static
 
-const _treeSpots = [
-  (1.5, 1.5, 1.0),
-  (14.5, 2.5, 0.85),
-  (1.5, 9.8, 0.9),
-  (14.4, 10.4, 1.05),
-  (5.5, 0.6, 0.7),
-  (10.5, 10.6, 0.8),
-];
-
 class StaticBoardPainter extends CustomPainter {
   final Game game;
   final int rev;
@@ -397,7 +388,7 @@ class StaticBoardPainter extends CustomPainter {
       buildingAt[b.cell] = b;
     }
     final treeAt = <Cell, (double, double, double)>{};
-    for (final t in _treeSpots) {
+    for (final t in game.trees) {
       final cell = Cell(t.$1.floor(), t.$2.floor());
       if (game.board.containsKey(cell) ||
           game.isWater(cell) ||

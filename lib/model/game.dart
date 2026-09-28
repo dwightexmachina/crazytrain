@@ -94,6 +94,9 @@ class Game extends ChangeNotifier {
   /// grade it was built from) rather than on the submerged terrain.
   final Map<Cell, int> deck = {};
 
+  /// Decorative trees: (x, y, scale) in plane coords, owned by the map.
+  final List<(double, double, double)> trees = [];
+
   /// Launchpad cell -> its partner; every pair is stored in both directions.
   final Map<Cell, Cell> launchpads = {};
   Cell? pendingPad; // first pad of a pair being placed
@@ -141,9 +144,15 @@ class Game extends ChangeNotifier {
   /// The cell dips below the water table.
   bool isWater(Cell c) => heights.isWet(c);
 
-  /// Cows wander only on dry land — no water, no launchpads.
-  bool _cowTerrain(Cell c) =>
-      !isWater(c) && !launchpads.containsKey(c);
+  /// Cows wander only on dry, walkable land — no water, no launchpads,
+  /// nothing steeper than a single step across the cell.
+  bool _cowTerrain(Cell c) {
+    if (isWater(c) || launchpads.containsKey(c)) return false;
+    final (a, b, d, e) = heights.corners(c);
+    final lo = math.min(math.min(a, b), math.min(d, e));
+    final hi = math.max(math.max(a, b), math.max(d, e));
+    return hi - lo <= 1;
+  }
 
   Game() {
     if (!_load()) _initialLayout();
@@ -168,6 +177,7 @@ class Game extends ChangeNotifier {
     board.clear();
     buildings.clear();
     deck.clear();
+    trees.clear();
     launchpads.clear();
     pendingPad = null;
     switches.clear();
@@ -209,7 +219,32 @@ class Game extends ChangeNotifier {
   void _generateTerrain() {
     _generateRiver();
     _carveBlobs(blobs: 2, minSize: 2, extraSize: 3);
-    _generateHills(3);
+    _generateHills(2 + (cols * rows) ~/ 96);
+    _scatterTrees((cols * rows) ~/ 24);
+  }
+
+  /// Sprinkle trees on open ground, optionally inside a region.
+  void _scatterTrees(int count,
+      {int? xMin, int? xMax, int? yMin, int? yMax}) {
+    final x0 = xMin ?? 0, x1 = xMax ?? cols - 1;
+    final y0 = yMin ?? 0, y1 = yMax ?? rows - 1;
+    var made = 0;
+    var guard = 0;
+    while (made < count && guard++ < count * 20) {
+      final cell = Cell(
+          x0 + _rng.nextInt(x1 - x0 + 1), y0 + _rng.nextInt(y1 - y0 + 1));
+      if (_protectedCell(cell) ||
+          isWater(cell) ||
+          trees.any((t) => t.$1.floor() == cell.x && t.$2.floor() == cell.y)) {
+        continue;
+      }
+      trees.add((
+        cell.x + 0.3 + _rng.nextDouble() * 0.4,
+        cell.y + 0.3 + _rng.nextDouble() * 0.4,
+        0.7 + _rng.nextDouble() * 0.4,
+      ));
+      made++;
+    }
   }
 
   /// Sink one cell below the water table, if all four corners sit on the
@@ -235,23 +270,36 @@ class Game extends ChangeNotifier {
     return true;
   }
 
-  /// Raise a few random peaks with the terraform cascade. The vertex lock
-  /// keeps them away from track, buildings and water automatically.
+  /// Raise peaks and short ridges with the terraform cascade. The vertex
+  /// lock keeps them away from track, buildings and bridges automatically.
   void _generateHills(int count) {
     var made = 0;
     var guard = 0;
-    while (made < count && guard++ < 80) {
-      final vx = 1 + _rng.nextInt(cols - 1);
-      final vy = 1 + _rng.nextInt(rows - 1);
-      final steps = 2 + _rng.nextInt(2);
-      var raised = 0;
-      for (var i = 0; i < steps; i++) {
+    int raiseTimes(int vx, int vy, int times) {
+      var done = 0;
+      for (var i = 0; i < times; i++) {
         final plan = heights.planStep(vx, vy, 1, locked: _lockedVertex);
         if (plan == null) break;
         heights.apply(plan);
-        raised++;
+        done++;
       }
-      if (raised > 0) made++;
+      return done;
+    }
+
+    while (made < count && guard++ < 80) {
+      final vx = 1 + _rng.nextInt(cols - 1);
+      final vy = 1 + _rng.nextInt(rows - 1);
+      final steps = 2 + _rng.nextInt(3);
+      final raised = raiseTimes(vx, vy, steps);
+      if (raised < 2) continue; // a one-step nub isn't a hill; try elsewhere
+      // Half the time, grow the peak into a short ridge.
+      if (_rng.nextBool()) {
+        final dx = _rng.nextBool() ? 1 : -1;
+        final along = _rng.nextBool();
+        raiseTimes(vx + (along ? dx : 0), vy + (along ? 0 : dx),
+            math.max(1, raised - 1));
+      }
+      made++;
     }
   }
 
@@ -267,6 +315,8 @@ class Game extends ChangeNotifier {
 
     for (var y = 0; y < rows; y++) {
       dig(Cell(x, y));
+      // Widen the channel here and there so it reads as a river valley.
+      if (_rng.nextInt(3) == 0 && x + 1 <= xMax) dig(Cell(x + 1, y));
       if (_rng.nextInt(3) == 0) {
         final nx = x + (_rng.nextBool() ? 1 : -1);
         if (nx >= xMin && nx <= xMax) {
@@ -517,10 +567,13 @@ class Game extends ChangeNotifier {
 
   // ------------------------------------------------------------ buildings
 
+  List<(int, int)> _cornersOf(Cell c) => [
+        (c.x, c.y), (c.x + 1, c.y), (c.x + 1, c.y + 1), (c.x, c.y + 1),
+      ];
+
   String? placeBuilding(BuildingType type, Cell c) {
     if (!inBounds(c)) return 'Out of bounds';
     if (isWater(c)) return "Can't build on water";
-    if (!heights.isFlat(c)) return 'Needs flat ground';
     if (board.containsKey(c) ||
         _cellBlocked(c) ||
         launchpads.containsKey(c) ||
@@ -529,8 +582,42 @@ class Game extends ChangeNotifier {
     }
     final trigger = _adjacentTrack(c);
     if (trigger == null) return 'Must touch track';
-    if (balance < type.price) return 'Not enough money';
-    balance -= type.price;
+    // Auto-flatten an uneven site, priced like the terraform tools. All or
+    // nothing: if any corner can't reach the target, restore and refuse.
+    var flatCost = 0;
+    List<int>? snapshot;
+    if (!heights.isFlat(c)) {
+      snapshot = heights.toList();
+      final target = heights.centerZ(c).round();
+      var steps = 0;
+      var ok = true;
+      for (final (vx, vy) in _cornersOf(c)) {
+        var guard = 0;
+        while (ok && heights.vAt(vx, vy) != target && guard++ < 12) {
+          final delta = heights.vAt(vx, vy) < target ? 1 : -1;
+          final plan = heights.planStep(vx, vy, delta, locked: _lockedVertex);
+          if (plan == null) {
+            ok = false;
+          } else {
+            steps += heights.stepsIn(plan);
+            heights.apply(plan);
+          }
+        }
+      }
+      if (!ok || !heights.isFlat(c)) {
+        heights.loadFrom(snapshot);
+        return "Can't level this ground";
+      }
+      flatCost = steps * priceTerraformStep;
+    }
+    if (balance < type.price + flatCost) {
+      if (snapshot != null) heights.loadFrom(snapshot);
+      return 'Not enough money';
+    }
+    balance -= type.price + flatCost;
+    if (flatCost > 0 && toasts.length < 6) {
+      toasts.add(Toast(c.x + 0.5, c.y - 0.3, 'Leveled −\$$flatCost'));
+    }
     buildings.add(Building(c, type, trigger));
     structureRev++;
     _save();
@@ -604,13 +691,15 @@ class Game extends ChangeNotifier {
       cols += expandStep;
       heights.expand(cols, rows);
       _carveBlobs(blobs: 1, minSize: 2, extraSize: 3, xMin: x0);
+      _scatterTrees(expandStep * rows ~/ 24, xMin: x0);
     } else {
       final y0 = rows;
       rows += expandStep;
       heights.expand(cols, rows);
       _carveBlobs(blobs: 1, minSize: 2, extraSize: 3, yMin: y0);
+      _scatterTrees(expandStep * cols ~/ 24, yMin: y0);
     }
-    _generateHills(1);
+    _generateHills(1 + expandStep ~/ 4);
     structureRev++;
     _save();
     notifyListeners();
@@ -896,6 +985,7 @@ class Game extends ChangeNotifier {
           {'x': b.cell.x, 'y': b.cell.y, 't': b.type.index},
       ],
       'deck': {for (final e in deck.entries) e.key.toString(): e.value},
+      'trees': [for (final t in trees) '${t.$1}|${t.$2}|${t.$3}'],
       'cows': [for (final k in cows) k.cell.toString()],
       'pads': [
         // Each pair once; the map holds both directions.
@@ -969,6 +1059,15 @@ class Game extends ChangeNotifier {
       (data['deck'] as Map<String, dynamic>? ?? {}).forEach((k, v) {
         deck[Cell.parse(k)] = v as int;
       });
+      trees.clear();
+      for (final t in (data['trees'] as List? ?? [])) {
+        final p = (t as String).split('|');
+        trees.add((
+          double.parse(p[0]),
+          double.parse(p[1]),
+          double.parse(p[2]),
+        ));
+      }
       cows.clear();
       for (final c in (data['cows'] as List? ?? [])) {
         cows.add(Cow(Cell.parse(c as String), 2 + _rng.nextDouble() * 3));
@@ -1034,6 +1133,8 @@ class Game extends ChangeNotifier {
         }
         if (board.containsKey(wc) || switches.containsKey(wc)) deck[wc] = f;
       });
+      // Saves from before trees were map-owned get a fresh scatter.
+      if (data['trees'] == null) _scatterTrees((cols * rows) ~/ 24);
       balance = data['balance'] as int;
       cars = data['cars'] as int;
       for (final b in buildings) {

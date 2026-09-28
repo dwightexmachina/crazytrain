@@ -104,7 +104,7 @@ void main() {
   });
 
   group('heightfield', () {
-    test('sculpting raises a vertex, blocks rail and buildings, charges', () {
+    test('sculpting raises a vertex, blocks side-sloped rail, charges', () {
       final g = flatGame();
       g.balance = 1000;
       // Raise the vertex at (7,1): cells (6..7, 0..1) become sloped.
@@ -112,11 +112,9 @@ void main() {
       expect(g.heights.vAt(7, 1), 1);
       expect(g.balance, 1000 - Game.priceTerraformStep);
       expect(g.heights.isFlat(const Cell(6, 1)), isFalse);
-      // Track stops at the slope, buildings refuse it.
+      // The lone vertex makes (6,1) side-sloped: rail stops short of it.
       final plan = g.planTrack(const [Cell(4, 1), Cell(5, 1), Cell(6, 1)]);
       expect(plan.pieces.length, 2);
-      expect(g.placeBuilding(BuildingType.stop, const Cell(6, 1)),
-          'Needs flat ground');
       // Lowering it back flattens the ground again.
       expect(g.sculpt(const Cell(6, 1), const Offset(0.9, 0.2), -1), isNull);
       expect(g.heights.isFlat(const Cell(6, 1)), isTrue);
@@ -392,6 +390,49 @@ void main() {
       final sw = g2.switches[const Cell(5, 3)]!;
       expect(sw.base, Dir.n);
       expect(sw.useB, isTrue);
+    });
+  });
+
+  group('auto-flatten & generation', () {
+    test('buildings level an uneven site and charge for the earthworks', () {
+      final g = flatGame();
+      g.balance = 1000;
+      // Vertex (7,2) is free ground; raising it makes cell (7,2) uneven.
+      expect(g.sculpt(const Cell(6, 1), const Offset(0.9, 0.9), 1), isNull);
+      expect(g.heights.vAt(7, 2), 1);
+      expect(g.heights.isFlat(const Cell(7, 2)), isFalse);
+      final before = g.balance;
+      // (7,2) touches the starter loop's top edge at (7,3).
+      expect(g.placeBuilding(BuildingType.stop, const Cell(7, 2)), isNull);
+      expect(g.heights.isFlat(const Cell(7, 2)), isTrue);
+      expect(before - g.balance,
+          BuildingType.stop.price + Game.priceTerraformStep);
+      expect(g.buildings.any((b) => b.cell == const Cell(7, 2)), isTrue);
+    });
+
+    test('flattening refuses when a locked corner must move, and restores',
+        () {
+      final g = flatGame();
+      g.balance = 1000;
+      // Vertex (7,3) belongs to track cells: hand-raise it so the site is
+      // uneven but only fixable by moving locked ground.
+      g.heights.setVertex(7, 3, 1);
+      final snapshot = g.heights.toList();
+      final before = g.balance;
+      expect(g.placeBuilding(BuildingType.stop, const Cell(7, 2)),
+          "Can't level this ground");
+      expect(g.heights.toList(), snapshot);
+      expect(g.balance, before);
+    });
+
+    test('new maps grow taller hills and map-owned trees that persist', () {
+      final g = freshGame();
+      g.newGame();
+      expect(g.heights.toList().any((h) => h >= 2), isTrue);
+      expect(g.trees, isNotEmpty);
+      final treesBefore = List.of(g.trees);
+      final g2 = Game();
+      expect(g2.trees, treesBefore);
     });
   });
 

@@ -529,7 +529,7 @@ class _ShopPanelState extends State<ShopPanel> {
       Tool.track =>
         'Drag across the board to lay track. Corners become curves automatically. Straights climb one step per cell; curves need flat ground. Trains slow uphill and speed downhill.',
       Tool.stop || Tool.depot =>
-        'Tap an empty cell next to your track. It pays its bonus every time the train passes.',
+        'Tap an empty cell next to your track. Uneven ground is leveled automatically (\$${Game.priceTerraformStep} per step). It pays its bonus every time the train passes.',
       Tool.bulldoze => 'Tap or drag over track and buildings to remove them.',
       Tool.raiseLand =>
         'Tap or drag to lift the ground one step at a time. Neighboring land follows so hills stay smooth — raise a riverbed to drain it.',
