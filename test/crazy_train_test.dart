@@ -561,6 +561,89 @@ void main() {
     });
   });
 
+  group('tunnels', () {
+    /// A one-cell ridge between (5,1) and (8,1): vertices (7,1),(7,2) raised.
+    Game ridgeGame() {
+      final g = flatGame();
+      g.balance = 100000;
+      g.sculpt(const Cell(6, 1), const Offset(0.9, 0.2), 1); // vertex (7,1)
+      g.sculpt(const Cell(6, 1), const Offset(0.9, 0.9), 1); // vertex (7,2)
+      return g;
+    }
+
+    test('two-tap boring links portals through covered ground', () {
+      final g = ridgeGame();
+      final before = g.balance;
+      expect(g.tapTunnel(const Cell(5, 1)), isNull);
+      expect(g.pendingTunnel, const Cell(5, 1));
+      expect(g.tapTunnel(const Cell(8, 1)), isNull);
+      expect(g.tunnels[const Cell(5, 1)], const Cell(8, 1));
+      expect(g.tunnels[const Cell(8, 1)], const Cell(5, 1));
+      expect(before - g.balance, Game.priceTunnel);
+    });
+
+    test('boring validates alignment, spacing and cover', () {
+      final g = ridgeGame();
+      g.tapTunnel(const Cell(5, 1));
+      expect(g.tapTunnel(const Cell(9, 0)), 'Portals must line up');
+      expect(g.tapTunnel(const Cell(6, 1)), 'Portals need flat ground');
+      expect(g.tapTunnel(const Cell(3, 1)),
+          'No mountain to bore through'); // open ground west of the portal
+    });
+
+    test('traceLoop dives through a portal pair, sideways entry derails', () {
+      final board = <Cell, TrackKind>{};
+      for (var x = 3; x <= 7; x++) {
+        board[Cell(x, 2)] = TrackKind.ew;
+        board[Cell(x, 6)] = TrackKind.ew;
+      }
+      for (var y = 3; y <= 5; y++) {
+        board[Cell(2, y)] = TrackKind.ns;
+        board[Cell(8, y)] = TrackKind.ns;
+      }
+      board[const Cell(2, 2)] = TrackKind.se;
+      board[const Cell(8, 2)] = TrackKind.sw;
+      board[const Cell(8, 6)] = TrackKind.nw;
+      board[const Cell(2, 6)] = TrackKind.ne;
+      board.remove(const Cell(4, 2));
+      board.remove(const Cell(5, 2));
+      board.remove(const Cell(6, 2));
+      final bores = {
+        const Cell(4, 2): const Cell(6, 2),
+        const Cell(6, 2): const Cell(4, 2),
+      };
+      final path = traceLoop(board, const Cell(3, 2), Dir.e, tunnels: bores);
+      expect(path, isNotNull);
+      expect(path!.where((s) => s.tunnelTo != null).length, 1);
+      // Approaching a portal perpendicular to its axis breaks the loop.
+      final sideways = {
+        const Cell(4, 2): const Cell(4, 5),
+        const Cell(4, 5): const Cell(4, 2),
+      };
+      expect(traceLoop(board, const Cell(3, 2), Dir.e, tunnels: sideways),
+          isNull);
+    });
+
+    test('stripping the cover collapses the tunnel', () {
+      final g = ridgeGame();
+      g.tapTunnel(const Cell(5, 1));
+      g.tapTunnel(const Cell(8, 1));
+      expect(g.tunnels, isNotEmpty);
+      // Lower the ridge back down: the bore loses its roof.
+      g.sculpt(const Cell(6, 1), const Offset(0.9, 0.2), -1);
+      g.sculpt(const Cell(6, 1), const Offset(0.9, 0.9), -1);
+      expect(g.tunnels, isEmpty);
+    });
+
+    test('portal pairs persist across reload', () {
+      final g = ridgeGame();
+      g.tapTunnel(const Cell(5, 1));
+      g.tapTunnel(const Cell(8, 1));
+      final g2 = Game();
+      expect(g2.tunnels[const Cell(5, 1)], const Cell(8, 1));
+    });
+  });
+
   group('camera', () {
     test('cellAt round-trips cell centers under every rotation', () {
       final g = flatGame();

@@ -46,6 +46,7 @@ enum Tool {
   lowerLand,
   launchpad,
   switchTrack,
+  tunnel,
 }
 
 class Toast {
@@ -84,6 +85,7 @@ class Game extends ChangeNotifier {
   static const int priceTerraformStep = 10; // per vertex-height-step moved
   static const int priceLaunchpad = 300; // per linked pair of pads
   static const int priceSwitch = 500; // converts a track piece to a turnout
+  static const int priceTunnel = 400; // per bored portal pair
   static const double tilesPerSecond = 2.2;
 
   final Map<Cell, TrackKind> board = {};
@@ -102,6 +104,10 @@ class Game extends ChangeNotifier {
   Cell? pendingPad; // first pad of a pair being placed
   final Map<Cell, TrackSwitch> switches = {};
   Cell? pendingSwitch; // armed track piece awaiting its base-side tap
+
+  /// Tunnel portal -> its partner; every pair is stored in both directions.
+  final Map<Cell, Cell> tunnels = {};
+  Cell? pendingTunnel; // first portal of a pair being placed
   final List<Cow> cows = [];
   int cols = startCols, rows = startRows;
   int deeds = 0; // land deeds bought; each one raises the next deed's price
@@ -147,7 +153,9 @@ class Game extends ChangeNotifier {
   /// Cows wander only on dry, walkable land — no water, no launchpads,
   /// nothing steeper than a single step across the cell.
   bool _cowTerrain(Cell c) {
-    if (isWater(c) || launchpads.containsKey(c)) return false;
+    if (isWater(c) || launchpads.containsKey(c) || tunnels.containsKey(c)) {
+      return false;
+    }
     final (a, b, d, e) = heights.corners(c);
     final lo = math.min(math.min(a, b), math.min(d, e));
     final hi = math.max(math.max(a, b), math.max(d, e));
@@ -163,6 +171,7 @@ class Game extends ChangeNotifier {
     tool = tool == t ? Tool.none : t;
     pendingPad = null; // switching tools abandons half-placed pieces
     pendingSwitch = null;
+    pendingTunnel = null;
     notifyListeners();
   }
 
@@ -182,6 +191,8 @@ class Game extends ChangeNotifier {
     pendingPad = null;
     switches.clear();
     pendingSwitch = null;
+    tunnels.clear();
+    pendingTunnel = null;
     cows.clear();
     cols = startCols;
     rows = startRows;
@@ -213,6 +224,7 @@ class Game extends ChangeNotifier {
   bool _protectedCell(Cell c) =>
       board.containsKey(c) ||
       launchpads.containsKey(c) ||
+      tunnels.containsKey(c) ||
       buildings.any((b) =>
           (b.cell.x - c.x).abs() <= 1 && (b.cell.y - c.y).abs() <= 1);
 
@@ -395,9 +407,9 @@ class Game extends ChangeNotifier {
     if (trigger != null && board.containsKey(trigger)) {
       final kind = board[trigger]!;
       p = traceLoop(board, trigger, kind.conn.first,
-              pads: launchpads, switches: switches) ??
+              pads: launchpads, tunnels: tunnels, switches: switches) ??
           traceLoop(board, trigger, kind.conn.last,
-              pads: launchpads, switches: switches);
+              pads: launchpads, tunnels: tunnels, switches: switches);
     }
     path = p;
     if (p != null) {
@@ -457,7 +469,7 @@ class Game extends ChangeNotifier {
 
   /// Time cost of one path step: climbing is slow, descending is quick.
   double stepCost(PathStep st) {
-    if (st.flyTo != null) return 1;
+    if (st.flyTo != null || st.tunnelTo != null) return 1;
     final g = railEdgeZ(st.cell, st.exit) - railEdgeZ(st.cell, st.entry);
     if (g > 0.01) return 1.35;
     if (g < -0.01) return 0.75;
@@ -479,6 +491,7 @@ class Game extends ChangeNotifier {
       if (!inBounds(c) ||
           _cellBlocked(c) ||
           launchpads.containsKey(c) ||
+          tunnels.containsKey(c) ||
           switches.containsKey(c)) {
         break;
       }
@@ -577,6 +590,7 @@ class Game extends ChangeNotifier {
     if (board.containsKey(c) ||
         _cellBlocked(c) ||
         launchpads.containsKey(c) ||
+        tunnels.containsKey(c) ||
         switches.containsKey(c)) {
       return 'Cell occupied';
     }
@@ -609,6 +623,7 @@ class Game extends ChangeNotifier {
         return "Can't level this ground";
       }
       flatCost = steps * priceTerraformStep;
+      _collapseBrokenTunnels();
     }
     if (balance < type.price + flatCost) {
       if (snapshot != null) heights.loadFrom(snapshot);
@@ -647,6 +662,7 @@ class Game extends ChangeNotifier {
         if (board.containsKey(c) ||
             switches.containsKey(c) ||
             launchpads.containsKey(c) ||
+            tunnels.containsKey(c) ||
             _cellBlocked(c)) {
           return true;
         }
@@ -667,6 +683,7 @@ class Game extends ChangeNotifier {
     if (cost > balance) return 'Not enough money';
     balance -= cost;
     heights.apply(plan);
+    _collapseBrokenTunnels();
     structureRev++;
     _save();
     notifyListeners();
@@ -721,7 +738,7 @@ class Game extends ChangeNotifier {
     if (board.containsKey(c) || switches.containsKey(c)) {
       return 'Remove the track first';
     }
-    if (_cellBlocked(c)) return 'Cell occupied';
+    if (_cellBlocked(c) || tunnels.containsKey(c)) return 'Cell occupied';
     if (isWater(c)) return "Can't float on water";
     if (!heights.isFlat(c)) return 'Needs flat ground';
     if (balance < priceLaunchpad) return 'Not enough money';
@@ -739,6 +756,85 @@ class Game extends ChangeNotifier {
     _save();
     notifyListeners();
     return null;
+  }
+
+  // ------------------------------------------------------------ tunnels
+
+  /// The bore between portals [a] and [b] (exclusive) stays underground:
+  /// every intermediate cell must ride at least half a step above the
+  /// portal grade and never dip below it.
+  bool _boreCovered(Cell a, Cell b) {
+    final lvl = heights.floorOf(a);
+    final dx = (b.x - a.x).sign, dy = (b.y - a.y).sign;
+    var mid = Cell(a.x + dx, a.y + dy);
+    while (mid != b) {
+      if (heights.minCorner(mid) < lvl || heights.centerZ(mid) < lvl + 0.5) {
+        return false;
+      }
+      mid = Cell(mid.x + dx, mid.y + dy);
+    }
+    return true;
+  }
+
+  /// Two-tap placement: first tap arms a portal, second tap bores to it.
+  /// Tapping the armed portal again cancels. Returns an error, or null.
+  String? tapTunnel(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    final first = pendingTunnel;
+    if (first == c) {
+      pendingTunnel = null;
+      notifyListeners();
+      return null;
+    }
+    if (tunnels.containsKey(c)) return 'Already a tunnel portal';
+    if (board.containsKey(c) || switches.containsKey(c)) {
+      return 'Remove the track first';
+    }
+    if (_cellBlocked(c) || launchpads.containsKey(c)) return 'Cell occupied';
+    if (isWater(c)) return "Can't bore from water";
+    if (!heights.isFlat(c)) return 'Portals need flat ground';
+    if (balance < priceTunnel) return 'Not enough money';
+    if (first == null) {
+      pendingTunnel = c;
+      notifyListeners();
+      return null;
+    }
+    if (axisDir(first, c) == null) return 'Portals must line up';
+    final dist = (c.x - first.x).abs() + (c.y - first.y).abs();
+    if (dist < 2) return 'Too close — nothing to bore through';
+    if (heights.floorOf(c) != heights.floorOf(first)) {
+      return 'Portal heights must match';
+    }
+    if (!_boreCovered(first, c)) return 'No mountain to bore through';
+    balance -= priceTunnel;
+    tunnels[first] = c;
+    tunnels[c] = first;
+    pendingTunnel = null;
+    _rebuildPath();
+    _save();
+    notifyListeners();
+    return null;
+  }
+
+  /// Sculpting can strip the ground off a bore; when it does, the tunnel
+  /// caves in.
+  void _collapseBrokenTunnels() {
+    final seen = <Cell>{};
+    final broken = <Cell>[];
+    tunnels.forEach((a, b) {
+      if (seen.contains(a)) return;
+      seen.add(a);
+      seen.add(b);
+      if (!_boreCovered(a, b)) broken.add(a);
+    });
+    for (final a in broken) {
+      final b = tunnels.remove(a)!;
+      tunnels.remove(b);
+      if (toasts.length < 6) {
+        toasts.add(Toast(a.x + 0.5, a.y - 0.3, 'Tunnel collapsed!', big: true));
+      }
+    }
+    if (broken.isNotEmpty) _rebuildPath();
   }
 
   // ------------------------------------------------------------ switches
@@ -798,6 +894,16 @@ class Game extends ChangeNotifier {
   // ------------------------------------------------------------ bulldoze
 
   void bulldoze(Cell c) {
+    final portal = tunnels[c];
+    if (portal != null) {
+      tunnels.remove(c);
+      tunnels.remove(portal);
+      balance += priceTunnel ~/ 2;
+      _rebuildPath();
+      _save();
+      notifyListeners();
+      return;
+    }
     if (switches.containsKey(c)) {
       switches.remove(c);
       balance += priceSwitch ~/ 2;
@@ -993,6 +1099,11 @@ class Game extends ChangeNotifier {
           if (e.key.toString().compareTo(e.value.toString()) < 0)
             '${e.key}|${e.value}',
       ],
+      'tunnels': [
+        for (final e in tunnels.entries)
+          if (e.key.toString().compareTo(e.value.toString()) < 0)
+            '${e.key}|${e.value}',
+      ],
       'switches': [
         for (final s in switches.values)
           {
@@ -1081,6 +1192,13 @@ class Game extends ChangeNotifier {
         final a = Cell.parse(ends[0]), b = Cell.parse(ends[1]);
         launchpads[a] = b;
         launchpads[b] = a;
+      }
+      tunnels.clear();
+      for (final p in (data['tunnels'] as List? ?? [])) {
+        final ends = (p as String).split('|');
+        final a = Cell.parse(ends[0]), b = Cell.parse(ends[1]);
+        tunnels[a] = b;
+        tunnels[b] = a;
       }
       switches.clear();
       for (final s in (data['switches'] as List? ?? [])) {

@@ -78,13 +78,15 @@ class Cell {
 
 /// One step of the train's loop: the cell plus which edges it enters/exits.
 /// A step with [flyTo] set is airborne: the train launches from [cell]'s
-/// center and lands on [flyTo]'s center, keeping its heading.
+/// center and lands on [flyTo]'s center, keeping its heading. A step with
+/// [tunnelTo] set travels underground between portals and is not drawn.
 class PathStep {
   final Cell cell;
   final Dir entry; // edge the train enters through
   final Dir exit; // edge it leaves through
   final Cell? flyTo;
-  const PathStep(this.cell, this.entry, this.exit, {this.flyTo});
+  final Cell? tunnelTo;
+  const PathStep(this.cell, this.entry, this.exit, {this.flyTo, this.tunnelTo});
 
   /// Flight arc height (in cell units) at fraction t of an airborne step.
   double flightZ(double t) {
@@ -101,7 +103,7 @@ class PathStep {
   /// quarter circle around the corner shared by the two edges.
   Offset posInCell(double t, double size) {
     final h = size / 2;
-    final to = flyTo;
+    final to = flyTo ?? tunnelTo;
     if (to != null) {
       final a = Offset(h, h);
       final b = Offset(
@@ -150,18 +152,29 @@ class PathStep {
 /// Walk the track from [start] leaving via [startExit]; returns the loop as
 /// path steps if it closes back onto [start], else null (broken track).
 ///
+/// The axis direction from [a] toward [b] when they share a row or column.
+Dir? axisDir(Cell a, Cell b) {
+  if (a.y == b.y && a.x != b.x) return b.x > a.x ? Dir.e : Dir.w;
+  if (a.x == b.x && a.y != b.y) return b.y > a.y ? Dir.s : Dir.n;
+  return null;
+}
+
 /// [pads] maps each launchpad cell to its partner (both directions). Rolling
 /// onto a pad adds three steps — ride on, fly to the partner, roll off — and
 /// the walk continues from the partner in the same travel direction.
+/// [tunnels] works the same but underground, and a portal only connects
+/// along its axis toward its partner.
 /// [switches] maps a cell to its turnout; routing follows the switch state.
 List<PathStep>? traceLoop(Map<Cell, TrackKind> board, Cell start, Dir startExit,
     {Map<Cell, Cell> pads = const {},
+    Map<Cell, Cell> tunnels = const {},
     Map<Cell, TrackSwitch> switches = const {}}) {
   final steps = <PathStep>[];
   var cell = start;
   var exit = startExit;
   // With switches a loop may cross a cell more than once; bound by states.
-  final maxHops = 4 * (board.length + pads.length + switches.length) + 4;
+  final maxHops =
+      4 * (board.length + pads.length + tunnels.length + switches.length) + 4;
   for (var i = 0; i <= maxHops; i++) {
     final next = cell.step(exit);
     final partner = pads[next];
@@ -172,6 +185,17 @@ List<PathStep>? traceLoop(Map<Cell, TrackKind> board, Cell start, Dir startExit,
       steps.add(PathStep(partner, entry, exit)); // roll off the partner
       cell = partner;
       continue; // heading unchanged
+    }
+    final bore = tunnels[next];
+    if (bore != null) {
+      final entry = exit.opposite;
+      // A portal faces its partner: entering from the side derails the loop.
+      if (exit != axisDir(next, bore)) return null;
+      steps.add(PathStep(next, entry, exit)); // into the portal
+      steps.add(PathStep(next, entry, exit, tunnelTo: bore)); // underground
+      steps.add(PathStep(bore, entry, exit)); // out the far side
+      cell = bore;
+      continue;
     }
     final sw = switches[next];
     if (sw != null) {

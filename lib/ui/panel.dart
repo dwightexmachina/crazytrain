@@ -263,15 +263,6 @@ class _ShopPanelState extends State<ShopPanel> {
           danger: true,
           desc: 'Remove track or buildings · 50% refund.',
         ),
-        const _ShopItem(
-          icon: Icons.schedule_rounded,
-          title: 'Tunnels',
-          tag: 'SOON',
-          chip: 'soon',
-          chipMuted: true,
-          enabled: false,
-          desc: 'Next feature — bores through the mountains you sculpt.',
-        ),
       ];
 
   List<_ShopItem> _build() => [
@@ -323,6 +314,16 @@ class _ShopPanelState extends State<ShopPanel> {
           enabled: game.balance >= Game.priceSwitch,
           desc:
               'Fork the line. Tap flat track, then the side the junction should face. Tap it later (in Select) to flip routes.',
+        ),
+        _toolItem(
+          tool: Tool.tunnel,
+          icon: Icons.looks_rounded,
+          title: 'Tunnel',
+          tag: '\$${Game.priceTunnel}',
+          chip: '\$${Game.priceTunnel}',
+          enabled: game.balance >= Game.priceTunnel,
+          desc:
+              'Bore under a mountain: tap two flat cells in line on opposite flanks, at matching height, with high ground the whole way between.',
         ),
       ];
 
@@ -513,6 +514,8 @@ class _ShopPanelState extends State<ShopPanel> {
         'Tap two clear cells to link a pad pair. Run track up to a pad and the train takes off, flies to its partner, and rolls on — rivers and mountains no object.',
       Tool.switchTrack =>
         'Tap a track piece, then an empty side: that side becomes the junction. Trains entering the junction side follow the thrown route; with no tool selected, tap a switch to flip it. Use two switches to build an alternate line.',
+      Tool.tunnel =>
+        'Tap two flat cells in a straight line, at the same height, with the mountain between them. Run track up to each portal — the train dives through. Mind your sculpting: strip the cover and the bore collapses.',
       Tool.none =>
         'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };

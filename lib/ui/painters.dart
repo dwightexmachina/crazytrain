@@ -317,6 +317,24 @@ void drawSwitch(Canvas c, IsoView v, TrackSwitch sw,
       Pal.lever, z);
 }
 
+/// A tunnel portal: a track stub running into a framed dark mouth on the
+/// side of the cell that faces its partner.
+void drawPortal(Canvas c, IsoView v, Cell cell, Cell partner, double z) {
+  final axis = axisDir(cell, partner);
+  if (axis == null) return;
+  drawTrackLine(c, v, connPolyline(cell, axis, axis.opposite), z: z);
+  final along = axis == Dir.e || axis == Dir.w;
+  final cx = cell.x +
+      switch (axis) { Dir.e => 0.93, Dir.w => 0.07, _ => 0.5 };
+  final cy = cell.y +
+      switch (axis) { Dir.s => 0.93, Dir.n => 0.07, _ => 0.5 };
+  // Stone frame, then the dark bore mouth inset toward the partner.
+  drawBox(c, v, cx, cy, along ? 0.14 : 0.7, along ? 0.7 : 0.14, 0.52,
+      Pal.rock, z);
+  drawBox(c, v, cx, cy, along ? 0.1 : 0.46, along ? 0.46 : 0.1, 0.42,
+      Pal.stack, z);
+}
+
 void drawLaunchpad(Canvas c, IsoView v, Cell cell,
     {double opacity = 1, double z = 0}) {
   final cx = cell.x + 0.5, cy = cell.y + 0.5;
@@ -545,6 +563,8 @@ class StaticBoardPainter extends CustomPainter {
         if (game.launchpads.containsKey(cell)) {
           drawLaunchpad(c, v, cell, z: flatZ);
         }
+        final portalTo = game.tunnels[cell];
+        if (portalTo != null) drawPortal(c, v, cell, portalTo, flatZ);
         final b = buildingAt[cell];
         if (b != null) drawBuilding(c, v, b, flatZ);
         final t = treeAt[cell];
@@ -666,9 +686,10 @@ class DynamicPainter extends CustomPainter {
           opacity: 0.55, z: hf.centerZ(pending) * kZStep);
     }
 
-    // Armed track piece awaiting its switch base-side tap.
-    final ps = game.pendingSwitch;
-    if (ps != null) {
+    // Armed track piece awaiting its switch base-side tap, or an armed
+    // first tunnel portal.
+    for (final ps in [game.pendingSwitch, game.pendingTunnel]) {
+      if (ps == null) continue;
       final (a, b, d, e) = hf.corners(ps);
       _face(c, Pal.ghostOk, [
         v.pt(ps.x.toDouble(), ps.y.toDouble(), a * kZStep),
@@ -711,6 +732,7 @@ class DynamicPainter extends CustomPainter {
       final idx = sPos.floor() % path.length;
       final t = sPos - sPos.floorToDouble();
       final st = path[idx];
+      if (st.tunnelTo != null) continue; // underground: unseen till it's out
       final local = st.posInCell(t, 1.0);
       final px = st.cell.x + local.dx, py = st.cell.y + local.dy;
       final heading = st.headingAt(t, 1.0);

@@ -156,6 +156,8 @@ class _BoardViewState extends State<BoardView>
         _maybeNotice(game.tapLaunchpad(c));
       case Tool.switchTrack:
         _maybeNotice(game.tapSwitch(c));
+      case Tool.tunnel:
+        _maybeNotice(game.tapTunnel(c));
       case Tool.stop ||
             Tool.depot ||
             Tool.raiseLand ||
@@ -191,6 +193,7 @@ class _BoardViewState extends State<BoardView>
             Tool.depot ||
             Tool.launchpad ||
             Tool.switchTrack ||
+            Tool.tunnel ||
             Tool.none:
         break;
     }
@@ -251,7 +254,8 @@ class _BoardViewState extends State<BoardView>
             Tool.raiseLand ||
             Tool.lowerLand ||
             Tool.launchpad ||
-            Tool.switchTrack:
+            Tool.switchTrack ||
+            Tool.tunnel:
         break;
     }
     _downPos = null;
