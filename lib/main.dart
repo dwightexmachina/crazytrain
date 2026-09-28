@@ -46,18 +46,11 @@ class _TrainMakerAppState extends State<TrainMakerApp> {
             body: Stack(
               fit: StackFit.expand,
               children: [
-                Column(
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TopBar(game: game),
-                    Expanded(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(child: BoardView(game: game)),
-                          ShopPanel(game: game),
-                        ],
-                      ),
-                    ),
+                    Expanded(child: BoardView(game: game)),
+                    ShopPanel(game: game),
                   ],
                 ),
                 if (_splash)

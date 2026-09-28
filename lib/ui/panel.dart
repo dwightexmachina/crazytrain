@@ -3,131 +3,9 @@ import 'package:flutter/material.dart';
 import '../model/game.dart';
 import 'palette.dart';
 
-// ---------------------------------------------------------------- top bar
-
-class TopBar extends StatelessWidget {
-  final Game game;
-  const TopBar({super.key, required this.game});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 54,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
-        color: Pal.chromeBg,
-        border: Border(bottom: BorderSide(color: Pal.chromeLine)),
-      ),
-      child: ListenableBuilder(
-        listenable: game,
-        builder: (context, _) {
-          final broken = game.path == null;
-          return Row(
-            children: [
-              Container(
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  color: Pal.accent,
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: const Icon(Icons.train_rounded, size: 18, color: Colors.white),
-              ),
-              const SizedBox(width: 10),
-              const Text('Crazy Train',
-                  style: TextStyle(
-                      fontSize: 17, fontWeight: FontWeight.w800, color: Pal.ink)),
-              const SizedBox(width: 16),
-              if (game.trains.any((t) => t.wrecked))
-                _chip('CRASH — tap the wreck to re-rail (\$${Game.priceRerail})',
-                    Pal.bad, filled: true)
-              else if (game.placingTrain)
-                _chip('Tap your line to place the new train', Pal.warn,
-                    filled: true)
-              else if (broken)
-                _chip('Track broken — train halted', Pal.bad, filled: true)
-              else if (game.cowBlocked)
-                _chip('MOO — cow on the line!', Pal.warn, filled: true)
-              else if (game.speed == 0)
-                _chip('Paused', Pal.muted)
-              else
-                _chip('Running', Pal.good),
-              const Spacer(),
-              Tooltip(
-                message: 'Honk! Shoos cows near the engine',
-                child: Material(
-                  color: Pal.accent,
-                  borderRadius: BorderRadius.circular(10),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: game.honk,
-                    child: const Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: Row(children: [
-                        Icon(Icons.campaign_rounded,
-                            size: 17, color: Colors.white),
-                        SizedBox(width: 5),
-                        Text('Honk',
-                            style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white)),
-                      ]),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              _SpeedControls(game: game),
-              const SizedBox(width: 12),
-              IconButton(
-                tooltip: 'Start over',
-                icon: const Icon(Icons.replay_rounded, color: Pal.muted),
-                onPressed: () => _confirmReset(context),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _chip(String text, Color color, {bool filled = false}) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: filled ? color.withValues(alpha: 0.12) : Pal.chip,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(text,
-            style: TextStyle(
-                fontSize: 12.5, fontWeight: FontWeight.w700, color: color)),
-      );
-
-  void _confirmReset(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Pal.chromeBg,
-        title: const Text('Start over?'),
-        content: const Text(
-            'This wipes your railway and money and rebuilds the starter loop.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Pal.bad),
-            onPressed: () {
-              game.newGame();
-              Navigator.pop(ctx);
-            },
-            child: const Text('Start over'),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// ------------------------------------------------------------ panel header
+// The old 54px top bar, folded into three compact rows at the top of the
+// shop panel: brand + reset, a full-width state chip, honk + speed.
 
 class _SpeedControls extends StatelessWidget {
   final Game game;
@@ -143,13 +21,13 @@ class _SpeedControls extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           onTap: () => game.setSpeed(v),
           child: Container(
-            width: 34,
-            height: 30,
+            width: 31,
+            height: 27,
             decoration: BoxDecoration(
               color: on ? Pal.accent : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, size: 17, color: on ? Colors.white : Pal.muted),
+            child: Icon(icon, size: 16, color: on ? Colors.white : Pal.muted),
           ),
         ),
       );
@@ -161,7 +39,7 @@ class _SpeedControls extends StatelessWidget {
         color: Pal.chip,
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Row(children: [
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
         btn(0, Icons.pause_rounded, 'Pause'),
         btn(1, Icons.play_arrow_rounded, 'Normal speed'),
         btn(2, Icons.fast_forward_rounded, 'Double speed'),
@@ -448,9 +326,13 @@ class _ShopPanelState extends State<ShopPanel> {
             controller: _scroll,
             padding: const EdgeInsets.all(12),
             children: [
-              _balanceCard(),
+              _brandRow(context),
               const SizedBox(height: 8),
-              _trainCard(),
+              _statusChip(),
+              const SizedBox(height: 8),
+              _controlsRow(),
+              const SizedBox(height: 10),
+              _balanceCard(),
               const SizedBox(height: 12),
               _sectionLabel('TOOLS'),
               _grid(_tools()),
@@ -488,6 +370,133 @@ class _ShopPanelState extends State<ShopPanel> {
                 color: Pal.faint)),
       );
 
+  Widget _brandRow(BuildContext context) => Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: Pal.accent,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child:
+                const Icon(Icons.train_rounded, size: 18, color: Colors.white),
+          ),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text('Crazy Train',
+                style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w800,
+                    color: Pal.ink)),
+          ),
+          Tooltip(
+            message: 'Start over',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(13),
+              onTap: () => _confirmReset(context),
+              child: const SizedBox(
+                width: 26,
+                height: 26,
+                child:
+                    Icon(Icons.replay_rounded, size: 17, color: Pal.faint),
+              ),
+            ),
+          ),
+        ],
+      );
+
+  Widget _statusChip() {
+    final broken = game.path == null;
+    final (String text, Color color, bool filled) = switch (true) {
+      _ when game.trains.any((t) => t.wrecked) => (
+          'CRASH — tap the wreck · \$${Game.priceRerail}',
+          Pal.bad,
+          true
+        ),
+      _ when game.placingTrain => (
+          'Tap your line to place the train',
+          Pal.warn,
+          true
+        ),
+      _ when broken => ('Track broken — train halted', Pal.bad, true),
+      _ when game.cowBlocked => ('MOO — cow on the line!', Pal.warn, true),
+      _ when game.speed == 0 => ('Paused', Pal.muted, false),
+      _ => ('Running', Pal.good, true),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        color: filled ? color.withValues(alpha: 0.13) : Pal.chip,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(text,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+              fontSize: 11.5, fontWeight: FontWeight.w800, color: color)),
+    );
+  }
+
+  Widget _controlsRow() => Row(
+        children: [
+          Expanded(
+            child: Tooltip(
+              message: 'Honk! Shoos cows near the engine',
+              child: Material(
+                color: Pal.accent,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: game.honk,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 7),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.campaign_rounded,
+                            size: 16, color: Colors.white),
+                        SizedBox(width: 5),
+                        Text('Honk',
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          _SpeedControls(game: game),
+        ],
+      );
+
+  void _confirmReset(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Pal.chromeBg,
+        title: const Text('Start over?'),
+        content: const Text(
+            'This wipes your railway and money and rebuilds the starter loop.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Pal.bad),
+            onPressed: () {
+              game.newGame();
+              Navigator.pop(ctx);
+            },
+            child: const Text('Start over'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _balanceCard() => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
@@ -516,26 +525,23 @@ class _ShopPanelState extends State<ShopPanel> {
                   fontWeight: FontWeight.w600,
                   color: game.path == null ? Pal.bad : Pal.good),
             ),
-          ],
-        ),
-      );
-
-  Widget _trainCard() => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-        decoration: BoxDecoration(
-          color: Pal.chip,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.train_rounded, size: 16, color: Pal.muted),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                '${game.cars} car${game.cars == 1 ? '' : 's'} · ${game.trackLength} track',
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w700, color: Pal.ink),
-              ),
+            const SizedBox(height: 3),
+            Row(
+              children: [
+                const Icon(Icons.train_rounded, size: 14, color: Pal.muted),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    '${game.trains.length} train${game.trains.length == 1 ? '' : 's'} · '
+                    '${game.cars} car${game.cars == 1 ? '' : 's'} · '
+                    '${game.trackLength} track',
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Pal.muted),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
