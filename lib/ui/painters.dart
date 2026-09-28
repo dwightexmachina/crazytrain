@@ -370,6 +370,24 @@ Color _shadeTri((int, int, int) base, List<(double, double, double)> tri) {
 
 // ---------------------------------------------------------------- static
 
+/// Trees that actually render: those not hidden under water or structures.
+Map<Cell, (double, double, double)> _visibleTrees(Game game) {
+  final buildingCells = {for (final b in game.buildings) b.cell};
+  final out = <Cell, (double, double, double)>{};
+  for (final t in game.trees) {
+    final cell = Cell(t.$1.floor(), t.$2.floor());
+    if (game.board.containsKey(cell) ||
+        game.isWater(cell) ||
+        game.switches.containsKey(cell) ||
+        game.launchpads.containsKey(cell) ||
+        buildingCells.contains(cell)) {
+      continue;
+    }
+    out[cell] = t;
+  }
+  return out;
+}
+
 class StaticBoardPainter extends CustomPainter {
   final Game game;
   final int rev;
@@ -387,18 +405,7 @@ class StaticBoardPainter extends CustomPainter {
     for (final b in game.buildings) {
       buildingAt[b.cell] = b;
     }
-    final treeAt = <Cell, (double, double, double)>{};
-    for (final t in game.trees) {
-      final cell = Cell(t.$1.floor(), t.$2.floor());
-      if (game.board.containsKey(cell) ||
-          game.isWater(cell) ||
-          game.switches.containsKey(cell) ||
-          game.launchpads.containsKey(cell) ||
-          buildingAt.containsKey(cell)) {
-        continue;
-      }
-      treeAt[cell] = t;
-    }
+    final treeAt = _visibleTrees(game);
 
     final gridPaint = Paint()
       ..style = PaintingStyle.stroke
@@ -594,31 +601,29 @@ class DynamicPainter extends CustomPainter {
   void _drawTrain(Canvas c, IsoView v) {
     final hf = game.heights;
     final items = <(double, void Function())>[];
+    final actors = <(double, double)>[]; // plane positions of moving things
     for (final cow in game.cows) {
       final px = cow.cell.x + 0.5, py = cow.cell.y + 0.5;
       final z = hf.centerZ(cow.cell) * kZStep;
+      actors.add((px, py));
       items.add((px + py, () => drawCow(c, v, px, py, z)));
     }
     final path = game.renderPath;
-    if (path == null) {
-      items.sort((a, b) => a.$1.compareTo(b.$1));
-      for (final it in items) {
-        it.$2();
-      }
-      return;
-    }
-    final len = path.length.toDouble();
+    final len = (path ?? const <PathStep>[]).length.toDouble();
     final vehicles = <(double, bool)>[]; // (s, isEngine)
-    vehicles.add((game.s, true));
-    for (var i = 0; i < game.cars; i++) {
-      var cs = game.s - 0.85 * (i + 1);
-      while (cs < 0) {
-        cs += len;
+    if (path != null) {
+      vehicles.add((game.s, true));
+      for (var i = 0; i < game.cars; i++) {
+        var cs = game.s - 0.85 * (i + 1);
+        while (cs < 0) {
+          cs += len;
+        }
+        vehicles.add((cs, false));
       }
-      vehicles.add((cs, false));
     }
     // Compute plane position + heading for each, then depth sort.
     for (final (sPos, isEngine) in vehicles) {
+      final path = game.renderPath!;
       final idx = sPos.floor() % path.length;
       final t = sPos - sPos.floorToDouble();
       final st = path[idx];
@@ -643,6 +648,7 @@ class DynamicPainter extends CustomPainter {
       final z = groundZ + st.flightZ(t);
       final horiz = math.cos(heading).abs() > math.sin(heading).abs();
       final w = horiz ? 0.68 : 0.34, d = horiz ? 0.34 : 0.68;
+      actors.add((px, py));
       items.add((px + py, () {
         drawShadow(c, v, px, py, st.flyTo != null ? 0.2 : 0.3, groundZ);
         if (isEngine) {
@@ -658,6 +664,34 @@ class DynamicPainter extends CustomPainter {
           drawBox(c, v, px, py, w * 0.94, d * 0.94, 0.26, Pal.car, 0.04 + z);
         }
       }));
+    }
+    // The dynamic layer always composites over the static one, so any tree
+    // or building near a moving actor re-enters THIS pass: depth order then
+    // decides who covers whom, instead of layer order.
+    final near = <Cell>{};
+    for (final (ax, ay) in actors) {
+      final cx = ax.floor(), cy = ay.floor();
+      for (var dx = -2; dx <= 2; dx++) {
+        for (var dy = -2; dy <= 2; dy++) {
+          near.add(Cell(cx + dx, cy + dy));
+        }
+      }
+    }
+    if (near.isNotEmpty) {
+      final treeAt = _visibleTrees(game);
+      final buildingAt = {for (final b in game.buildings) b.cell: b};
+      for (final cell in near) {
+        final t = treeAt[cell];
+        if (t != null) {
+          items.add((t.$1 + t.$2,
+              () => drawTree(c, v, t.$1, t.$2, t.$3, hf.centerZ(cell) * kZStep)));
+        }
+        final b = buildingAt[cell];
+        if (b != null) {
+          items.add((b.cell.x + b.cell.y + 1.0,
+              () => drawBuilding(c, v, b, hf.floorOf(b.cell) * kZStep)));
+        }
+      }
     }
     items.sort((a, b) => a.$1.compareTo(b.$1));
     for (final it in items) {
