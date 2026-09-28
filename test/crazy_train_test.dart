@@ -193,6 +193,32 @@ void main() {
       expect(cliff.pieces.length, 1);
     });
 
+    test('level tool matches dragged cells to the pressed grade', () {
+      final g = flatGame();
+      g.balance = 100000;
+      // A one-step plateau at (5..6, 1..2).
+      for (final vtx in const [(5, 1), (6, 1), (5, 2), (6, 2)]) {
+        g.sculpt(Cell(vtx.$1, vtx.$2), const Offset(0.2, 0.2), 1);
+      }
+      // Press flat ground: grade 0. Level the plateau cell down to it.
+      g.armLevel(const Cell(3, 1));
+      expect(g.levelTarget, 0);
+      final before = g.balance;
+      expect(g.levelTo(const Cell(5, 1)), isNull);
+      expect(g.heights.isFlat(const Cell(5, 1)), isTrue);
+      expect(g.heights.floorOf(const Cell(5, 1)), 0);
+      expect(before - g.balance, greaterThan(0));
+      // Press the remaining raised ground and pull flat land up to it.
+      g.armLevel(const Cell(1, 8));
+      expect(g.levelTarget, 0);
+      // Leveling a cell pinned by track fails cleanly and rolls back.
+      g.levelTarget = 1;
+      final snapshot = g.heights.toList();
+      final trackCell = g.board.keys.first;
+      expect(g.levelTo(trackCell), "Can't level under track or buildings");
+      expect(g.heights.toList(), snapshot);
+    });
+
     test('v2 mountains migrate into raised peaks', () {
       web.window.localStorage.clear();
       web.window.localStorage.setItem(

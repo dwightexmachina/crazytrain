@@ -348,6 +348,16 @@ class _ShopPanelState extends State<ShopPanel> {
           desc:
               'Carve valleys & basins. Dig below the waterline and water floods in — track over water needs a bridge (+\$${Game.priceBridge}).',
         ),
+        _toolItem(
+          tool: Tool.levelLand,
+          icon: Icons.iron,
+          title: 'Level land',
+          tag: '\$10/st',
+          chip: '\$${Game.priceTerraformStep} / step',
+          enabled: game.balance >= Game.priceTerraformStep,
+          desc:
+              'Match the grade: press a tile, then drag — everything you cross is leveled to it.',
+        ),
       ];
 
   _ShopItem _deedItem(Dir side, IconData icon, String label, String unit) {
@@ -502,6 +512,8 @@ class _ShopPanelState extends State<ShopPanel> {
         'Tap or drag to lift the ground one step at a time. Neighboring land follows so hills stay smooth — raise a riverbed to drain it.',
       Tool.lowerLand =>
         'Tap or drag to carve downward. Dig below the waterline and water floods in — that\'s how you make rivers and lakes. Track over water needs a bridge (+\$${Game.priceBridge}).',
+      Tool.levelLand =>
+        'Press a tile to set the grade, then drag: every cell you cross is raised or carved to match it. Cells pinned under track or buildings are skipped.',
       Tool.launchpad =>
         'Tap two clear cells to link a pad pair. Run track up to a pad and the train takes off, flies to its partner, and rolls on — rivers and mountains no object.',
       Tool.switchTrack =>

@@ -45,6 +45,7 @@ enum Tool {
   bulldoze,
   raiseLand,
   lowerLand,
+  levelLand,
   launchpad,
   switchTrack,
   tunnel,
@@ -173,6 +174,7 @@ class Game extends ChangeNotifier {
     pendingPad = null; // switching tools abandons half-placed pieces
     pendingSwitch = null;
     pendingTunnel = null;
+    levelTarget = null;
     notifyListeners();
   }
 
@@ -677,6 +679,54 @@ class Game extends ChangeNotifier {
       }
     }
     return false;
+  }
+
+  /// The level tool's reference grade, set by the cell first pressed.
+  int? levelTarget;
+
+  void armLevel(Cell c) {
+    if (!inBounds(c)) return;
+    levelTarget =
+        heights.isFlat(c) ? heights.floorOf(c) : heights.centerZ(c).round();
+  }
+
+  /// Drive every corner of [c] to [levelTarget], cascading and charging per
+  /// height-step like the other terraform tools. All or nothing per cell:
+  /// a cell that can't fully reach the grade is left untouched.
+  String? levelTo(Cell c) {
+    final target = levelTarget;
+    if (target == null) return null;
+    if (!inBounds(c)) return 'Out of bounds';
+    if (heights.isFlat(c) && heights.floorOf(c) == target) return null;
+    final snapshot = heights.toList();
+    var steps = 0;
+    var ok = true;
+    for (final (vx, vy) in _cornersOf(c)) {
+      var guard = 0;
+      while (ok && heights.vAt(vx, vy) != target && guard++ < 16) {
+        final delta = heights.vAt(vx, vy) < target ? 1 : -1;
+        final plan = heights.planStep(vx, vy, delta, locked: _lockedVertex);
+        if (plan == null) {
+          ok = false;
+        } else {
+          steps += heights.stepsIn(plan);
+          heights.apply(plan);
+        }
+      }
+    }
+    final cost = steps * priceTerraformStep;
+    if (!ok || !heights.isFlat(c) || cost > balance) {
+      heights.loadFrom(snapshot);
+      return !ok || !heights.isFlat(c)
+          ? "Can't level under track or buildings"
+          : 'Not enough money';
+    }
+    balance -= cost;
+    _collapseBrokenTunnels();
+    structureRev++;
+    _save();
+    notifyListeners();
+    return null;
   }
 
   /// Raise (delta 1) or lower (delta -1) the cell corner nearest [frac],

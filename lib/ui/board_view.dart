@@ -141,6 +141,14 @@ class _BoardViewState extends State<BoardView>
           _sculpt(local, game.tool == Tool.raiseLand ? 1 : -1, force: true));
       return;
     }
+    if (game.tool == Tool.levelLand) {
+      final c = _cellAt(local);
+      if (c != null) {
+        game.armLevel(c); // the pressed tile sets the grade to match
+        _maybeNotice(game.levelTo(c));
+      }
+      return;
+    }
     final c = _cellAt(local);
     if (c == null) return;
     switch (game.tool) {
@@ -161,6 +169,7 @@ class _BoardViewState extends State<BoardView>
             Tool.depot ||
             Tool.raiseLand ||
             Tool.lowerLand ||
+            Tool.levelLand ||
             Tool.none:
         break;
     }
@@ -186,6 +195,9 @@ class _BoardViewState extends State<BoardView>
         return;
       case Tool.lowerLand:
         _sculpt(local, -1);
+        return;
+      case Tool.levelLand:
+        game.levelTo(c);
         return;
       case Tool.track ||
             Tool.stop ||
@@ -222,6 +234,7 @@ class _BoardViewState extends State<BoardView>
     _panning = false;
     _lastPanPos = null;
     _lastSculpt = null;
+    game.levelTarget = null; // each level drag re-arms from its press
     final plan = _plan.value;
     _dragCells.clear();
     _plan.value = null;
@@ -252,6 +265,7 @@ class _BoardViewState extends State<BoardView>
       case Tool.bulldoze ||
             Tool.raiseLand ||
             Tool.lowerLand ||
+            Tool.levelLand ||
             Tool.launchpad ||
             Tool.switchTrack ||
             Tool.tunnel:
