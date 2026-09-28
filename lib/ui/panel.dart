@@ -38,7 +38,13 @@ class TopBar extends StatelessWidget {
                   style: TextStyle(
                       fontSize: 17, fontWeight: FontWeight.w800, color: Pal.ink)),
               const SizedBox(width: 16),
-              if (broken)
+              if (game.trains.any((t) => t.wrecked))
+                _chip('CRASH — tap the wreck to re-rail (\$${Game.priceRerail})',
+                    Pal.bad, filled: true)
+              else if (game.placingTrain)
+                _chip('Tap your line to place the new train', Pal.warn,
+                    filled: true)
+              else if (broken)
                 _chip('Track broken — train halted', Pal.bad, filled: true)
               else if (game.cowBlocked)
                 _chip('MOO — cow on the line!', Pal.warn, filled: true)
@@ -284,8 +290,8 @@ class _ShopPanelState extends State<ShopPanel> {
             chip: '\$${Game.priceSecondTrain}',
             enabled: game.balance >= Game.priceSecondTrain,
             desc:
-                'A second engine running the opposite direction — double the laps. Give it signals, or enjoy the fireworks.',
-            onTap: game.buySecondTrain,
+                'A second engine running the opposite direction — double the laps. Buy, then tap your line where it should start. Give it signals, or enjoy the fireworks.',
+            onTap: () => game.armSecondTrain(),
           )
         else
           const _ShopItem(

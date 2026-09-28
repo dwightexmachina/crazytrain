@@ -202,6 +202,8 @@ class Game extends ChangeNotifier {
     pendingSwitch = null;
     pendingTunnel = null;
     levelTarget = null;
+    placingTrain = false;
+    _spawnPath = null;
     notifyListeners();
   }
 
@@ -785,6 +787,57 @@ class Game extends ChangeNotifier {
     _save();
     notifyListeners();
     return true;
+  }
+
+  // Placement flow: buying arms it, then a tap on the line spawns there.
+  bool placingTrain = false;
+  List<PathStep>? _spawnPath;
+  Set<Cell> get spawnCells => _spawnPath == null
+      ? const {}
+      : {for (final st in _spawnPath!) st.cell};
+
+  String? armSecondTrain() {
+    if (trains.length > 1) return 'Second train already owned';
+    if (balance < priceSecondTrain) return 'Not enough money';
+    final trigger = station.trigger;
+    List<PathStep>? p;
+    if (trigger != null && board.containsKey(trigger)) {
+      final kind = board[trigger]!;
+      p = traceLoop(board, trigger, kind.conn.last,
+              pads: launchpads, tunnels: tunnels, switches: switches) ??
+          traceLoop(board, trigger, kind.conn.first,
+              pads: launchpads, tunnels: tunnels, switches: switches);
+    }
+    if (p == null) return 'Close the loop first';
+    _spawnPath = p;
+    placingTrain = true;
+    tool = Tool.none;
+    notifyListeners();
+    return null;
+  }
+
+  String? placeSecondTrain(Cell c) {
+    if (!placingTrain) return null;
+    final p = _spawnPath;
+    if (p == null) {
+      placingTrain = false;
+      return null;
+    }
+    final idx = p.indexWhere((st) => st.cell == c);
+    if (idx < 0) return 'Tap a cell on the line';
+    if (balance < priceSecondTrain) return 'Not enough money';
+    balance -= priceSecondTrain;
+    final t = Train(cars: 1, reversed: true)
+      ..path = p
+      ..lastPath = p
+      ..s = idx + 0.5;
+    trains.add(t);
+    placingTrain = false;
+    _spawnPath = null;
+    _rebuildPath(); // remaps s onto the freshly traced route by cell
+    _save();
+    notifyListeners();
+    return null;
   }
 
   /// Place a block signal on a track cell, or tap an existing one to
@@ -1416,7 +1469,11 @@ class Game extends ChangeNotifier {
   /// again, separated so they don't immediately re-collide.
   String? tapWreck(Cell c) {
     if (!trains.any((t) => t.wrecked)) return null;
-    final hit = trains.any((t) => t.wrecked && occupiedBy(t).contains(c));
+    // Forgiving: a tap within one cell of any wrecked vehicle counts.
+    final hit = trains.any((t) =>
+        t.wrecked &&
+        occupiedBy(t).any(
+            (oc) => (oc.x - c.x).abs() <= 1 && (oc.y - c.y).abs() <= 1));
     if (!hit) return null;
     if (balance < priceRerail) return 'Not enough money';
     balance -= priceRerail;

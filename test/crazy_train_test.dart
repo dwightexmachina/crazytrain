@@ -799,6 +799,22 @@ void main() {
       expect(t1.s, greaterThan(3.0));
     });
 
+    test('armed second train spawns where the line is tapped', () {
+      final g = flatGame();
+      g.balance = 5000;
+      expect(g.armSecondTrain(), isNull);
+      expect(g.placingTrain, isTrue);
+      expect(g.spawnCells, isNotEmpty);
+      expect(g.placeSecondTrain(const Cell(1, 1)), 'Tap a cell on the line');
+      final spot = g.spawnCells.first;
+      expect(g.placeSecondTrain(spot), isNull);
+      expect(g.placingTrain, isFalse);
+      expect(g.trains.length, 2);
+      expect(g.balance, 5000 - Game.priceSecondTrain);
+      final t2 = g.trains[1];
+      expect(t2.path![t2.s.floor() % t2.path!.length].cell, spot);
+    });
+
     test('signals toggle on track only and persist', () {
       final g = flatGame();
       g.balance = 1000;

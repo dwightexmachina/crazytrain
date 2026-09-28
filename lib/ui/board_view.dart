@@ -264,8 +264,12 @@ class _BoardViewState extends State<BoardView>
         if (down != null && (local - down).distance < 14) {
           final cell = _cellAt(down);
           if (cell != null) {
-            game.toggleSwitch(cell);
-            _maybeNotice(game.tapWreck(cell));
+            if (game.placingTrain) {
+              _maybeNotice(game.placeSecondTrain(cell));
+            } else {
+              game.toggleSwitch(cell);
+              _maybeNotice(game.tapWreck(cell));
+            }
           }
         }
       case Tool.bulldoze ||

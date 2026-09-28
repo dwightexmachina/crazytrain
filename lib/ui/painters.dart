@@ -716,6 +716,20 @@ class DynamicPainter extends CustomPainter {
           opacity: 0.55, z: hf.centerZ(pending) * kZStep);
     }
 
+    // Placing the second train: its route glows, hover shows the spot.
+    if (game.placingTrain) {
+      final route = game.spawnCells;
+      final guide = Pal.ghostOk.withValues(alpha: 0.18);
+      for (final rc in route) {
+        _face(c, guide, cellQuad(rc));
+      }
+      final target = hover.value;
+      if (target != null) {
+        _face(c, route.contains(target) ? Pal.ghostOk : Pal.ghostBad,
+            cellQuad(target));
+      }
+    }
+
     // Boring a tunnel: faint guides along the armed portal's row and
     // column, and a live bore preview to the hovered cell — green when the
     // link would take, red when it wouldn't.
