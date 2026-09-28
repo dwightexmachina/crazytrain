@@ -3,11 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:web/web.dart' as web;
 
-import 'package:trainmaker/main.dart';
-import 'package:trainmaker/model/game.dart';
-import 'package:trainmaker/model/track.dart';
-import 'package:trainmaker/ui/board_view.dart';
-import 'package:trainmaker/ui/painters.dart';
+import 'package:crazytrain/main.dart';
+import 'package:crazytrain/model/game.dart';
+import 'package:crazytrain/model/track.dart';
+import 'package:crazytrain/ui/board_view.dart';
+import 'package:crazytrain/ui/painters.dart';
 
 Game freshGame() {
   web.window.localStorage.clear();

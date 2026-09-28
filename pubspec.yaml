@@ -1,4 +1,4 @@
-name: trainmaker
+name: crazytrain
 description: "TrainMaker — an isometric train-building tycoon for the browser."
 publish_to: 'none'
 version: 0.1.0+1
