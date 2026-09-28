@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../model/game.dart';
-import '../model/track.dart';
 import 'painters.dart';
 import 'palette.dart';
 

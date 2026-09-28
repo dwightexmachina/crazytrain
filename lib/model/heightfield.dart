@@ -122,15 +122,15 @@ class HeightField {
 
   void apply(Map<int, int> plan) => plan.forEach((i, h) => _h[i] = h);
 
-  /// Grow the lattice for a land deed. Existing heights keep their
-  /// positions; new vertices replicate the old edge so the frontier joins
-  /// smoothly.
-  void expand(int newCols, int newRows) {
+  /// Grow the lattice for a land deed. Existing heights land at their old
+  /// positions shifted by (dx, dy) — north/west deeds move the world — and
+  /// new vertices replicate the old edge so the frontier joins smoothly.
+  void expand(int newCols, int newRows, {int dx = 0, int dy = 0}) {
     final out = List.filled((newCols + 1) * (newRows + 1), 0);
     for (var y = 0; y <= newRows; y++) {
       for (var x = 0; x <= newCols; x++) {
         out[y * (newCols + 1) + x] =
-            vAt(x.clamp(0, cols), y.clamp(0, rows));
+            vAt((x - dx).clamp(0, cols), (y - dy).clamp(0, rows));
       }
     }
     cols = newCols;

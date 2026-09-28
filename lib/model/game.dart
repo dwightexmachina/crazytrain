@@ -11,6 +11,7 @@ import 'heightfield.dart';
 import 'track.dart';
 
 export 'heightfield.dart';
+export 'track.dart' show Cell, Dir;
 
 enum BuildingType {
   station('Station', 0, 0), // the main terminus: pays the lap formula
@@ -700,31 +701,90 @@ class Game extends ChangeNotifier {
   // ------------------------------------------------------------ land deeds
 
   int get deedPrice => 400 + 200 * deeds;
-  bool get canExpandEast => cols + expandStep <= maxCols;
-  bool get canExpandSouth => rows + expandStep <= maxRows;
 
-  /// Buy a strip of frontier: [east] adds columns, otherwise rows. The new
-  /// land gets a sprinkle of fresh terrain to tame.
-  bool buyLand({required bool east}) {
-    if (east ? !canExpandEast : !canExpandSouth) return false;
+  bool canGrow(Dir side) => (side == Dir.e || side == Dir.w)
+      ? cols + expandStep <= maxCols
+      : rows + expandStep <= maxRows;
+
+  /// North/west deeds put new land before the origin, so everything that
+  /// exists slides over by the expansion step.
+  void _shiftWorld(int dx, int dy) {
+    if (dx == 0 && dy == 0) return;
+    Cell mv(Cell c) => Cell(c.x + dx, c.y + dy);
+    final b2 = {for (final e in board.entries) mv(e.key): e.value};
+    board
+      ..clear()
+      ..addAll(b2);
+    final d2 = {for (final e in deck.entries) mv(e.key): e.value};
+    deck
+      ..clear()
+      ..addAll(d2);
+    final p2 = {for (final e in launchpads.entries) mv(e.key): mv(e.value)};
+    launchpads
+      ..clear()
+      ..addAll(p2);
+    final t2 = {for (final e in tunnels.entries) mv(e.key): mv(e.value)};
+    tunnels
+      ..clear()
+      ..addAll(t2);
+    final s2 = <Cell, TrackSwitch>{};
+    switches.forEach((k, sw) {
+      final c = mv(k);
+      s2[c] = TrackSwitch(c, sw.base, sw.branchA, sw.branchB, useB: sw.useB);
+    });
+    switches
+      ..clear()
+      ..addAll(s2);
+    final nb = [
+      for (final b in buildings)
+        Building(mv(b.cell), b.type,
+            b.trigger == null ? null : mv(b.trigger!)),
+    ];
+    buildings
+      ..clear()
+      ..addAll(nb);
+    for (final cow in cows) {
+      cow.cell = mv(cow.cell);
+    }
+    final nt = [for (final t in trees) (t.$1 + dx, t.$2 + dy, t.$3)];
+    trees
+      ..clear()
+      ..addAll(nt);
+    toasts.clear();
+    pendingPad = null;
+    pendingSwitch = null;
+    pendingTunnel = null;
+  }
+
+  /// Buy a strip of frontier on any side. The new land gets a sprinkle of
+  /// fresh terrain to tame.
+  bool buyLand(Dir side) {
+    if (!canGrow(side)) return false;
     if (balance < deedPrice) return false;
     balance -= deedPrice;
     deeds++;
-    if (east) {
-      final x0 = cols;
+    final dx = side == Dir.w ? expandStep : 0;
+    final dy = side == Dir.n ? expandStep : 0;
+    if (side == Dir.e || side == Dir.w) {
       cols += expandStep;
-      heights.expand(cols, rows);
-      _carveBlobs(blobs: 1, minSize: 2, extraSize: 3, xMin: x0);
-      _scatterTrees(expandStep * rows ~/ 24, xMin: x0);
     } else {
-      final y0 = rows;
       rows += expandStep;
-      heights.expand(cols, rows);
-      _carveBlobs(blobs: 1, minSize: 2, extraSize: 3, yMin: y0);
-      _scatterTrees(expandStep * cols ~/ 24, yMin: y0);
     }
+    heights.expand(cols, rows, dx: dx, dy: dy);
+    _shiftWorld(dx, dy);
+    final (xMin, xMax, yMin, yMax) = switch (side) {
+      Dir.e => (cols - expandStep, cols - 1, 0, rows - 1),
+      Dir.w => (0, expandStep - 1, 0, rows - 1),
+      Dir.s => (0, cols - 1, rows - expandStep, rows - 1),
+      Dir.n => (0, cols - 1, 0, expandStep - 1),
+    };
+    _carveBlobs(
+        blobs: 1, minSize: 2, extraSize: 3,
+        xMin: xMin, xMax: xMax, yMin: yMin, yMax: yMax);
+    _scatterTrees((xMax - xMin + 1) * (yMax - yMin + 1) ~/ 24,
+        xMin: xMin, xMax: xMax, yMin: yMin, yMax: yMax);
     _generateHills(1 + expandStep ~/ 4);
-    structureRev++;
+    _rebuildPath();
     _save();
     notifyListeners();
     return true;

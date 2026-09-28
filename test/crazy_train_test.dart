@@ -443,7 +443,7 @@ void main() {
       g.balance = 5000;
       final c0 = g.cols;
       final p0 = g.deedPrice;
-      expect(g.buyLand(east: true), isTrue);
+      expect(g.buyLand(Dir.e), isTrue);
       expect(g.cols, c0 + Game.expandStep);
       expect(g.rows, Game.startRows);
       expect(g.balance, 5000 - p0);
@@ -459,22 +459,43 @@ void main() {
       final g = freshGame();
       g.newGame();
       g.balance = 1000000;
-      expect(g.buyLand(east: false), isTrue);
+      expect(g.buyLand(Dir.s), isTrue);
       expect(g.rows, Game.startRows + Game.expandStep);
-      while (g.buyLand(east: true)) {}
-      while (g.buyLand(east: false)) {}
+      while (g.buyLand(Dir.e)) {}
+      while (g.buyLand(Dir.s)) {}
       expect(g.cols, Game.maxCols);
       expect(g.rows, Game.maxRows);
-      expect(g.canExpandEast, isFalse);
-      expect(g.canExpandSouth, isFalse);
+      expect(g.canGrow(Dir.e), isFalse);
+      expect(g.canGrow(Dir.w), isFalse);
+      expect(g.canGrow(Dir.s), isFalse);
+      expect(g.canGrow(Dir.n), isFalse);
+    });
+
+    test('north and west deeds shift the whole world intact', () {
+      final g = flatGame();
+      g.balance = 100000;
+      g.sculpt(const Cell(6, 1), const Offset(0.9, 0.2), 1); // vertex (7,1)
+      final station0 = g.station.cell;
+      final trackCell = g.board.keys.first;
+      final kind = g.board[trackCell];
+      expect(g.path, isNotNull);
+      expect(g.buyLand(Dir.w), isTrue);
+      expect(g.cols, Game.startCols + Game.expandStep);
+      expect(g.board[Cell(trackCell.x + 4, trackCell.y)], kind);
+      expect(g.station.cell, Cell(station0.x + 4, station0.y));
+      expect(g.heights.vAt(7 + 4, 1), 1); // sculpted vertex moved along
+      expect(g.path, isNotNull); // the loop survived the move
+      expect(g.buyLand(Dir.n), isTrue);
+      expect(g.station.cell, Cell(station0.x + 4, station0.y + 4));
+      expect(g.path, isNotNull);
     });
 
     test('board size and deed count persist', () {
       final g = freshGame();
       g.newGame();
       g.balance = 5000;
-      g.buyLand(east: true);
-      g.buyLand(east: false);
+      g.buyLand(Dir.e);
+      g.buyLand(Dir.s);
       final g2 = Game();
       expect(g2.cols, Game.startCols + Game.expandStep);
       expect(g2.rows, Game.startRows + Game.expandStep);

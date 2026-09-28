@@ -340,7 +340,7 @@ class _ShopPanelState extends State<ShopPanel> {
         ),
         _toolItem(
           tool: Tool.lowerLand,
-          icon: Icons.south_west_rounded,
+          icon: Icons.front_loader,
           title: 'Lower land',
           tag: '\$10/st',
           chip: '\$${Game.priceTerraformStep} / step',
@@ -348,48 +348,37 @@ class _ShopPanelState extends State<ShopPanel> {
           desc:
               'Carve valleys & basins. Dig below the waterline and water floods in — track over water needs a bridge (+\$${Game.priceBridge}).',
         ),
-        if (game.canExpandEast)
-          _ShopItem(
-            icon: Icons.east_rounded,
-            title: 'Land deed · east',
-            tag: _money(game.deedPrice),
-            chip: '\$${game.deedPrice}',
-            enabled: game.balance >= game.deedPrice,
-            desc:
-                '+${Game.expandStep} columns of frontier, with fresh hills, water and trees. Price rises per deed.',
-            onTap: () => game.buyLand(east: true),
-          )
-        else
-          const _ShopItem(
-            icon: Icons.east_rounded,
-            title: 'Land deed · east',
-            tag: 'MAX',
-            chip: 'claimed',
-            chipMuted: true,
-            enabled: false,
-            desc: 'Frontier fully claimed — the map is at its eastern limit.',
-          ),
-        if (game.canExpandSouth)
-          _ShopItem(
-            icon: Icons.south_rounded,
-            title: 'Land deed · south',
-            tag: _money(game.deedPrice),
-            chip: '\$${game.deedPrice}',
-            enabled: game.balance >= game.deedPrice,
-            desc:
-                '+${Game.expandStep} rows of frontier, with fresh hills, water and trees. Price rises per deed.',
-            onTap: () => game.buyLand(east: false),
-          )
-        else
-          const _ShopItem(
-            icon: Icons.south_rounded,
-            title: 'Land deed · south',
-            tag: 'MAX',
-            chip: 'claimed',
-            chipMuted: true,
-            enabled: false,
-            desc: 'Frontier fully claimed — the map is at its southern limit.',
-          ),
+      ];
+
+  _ShopItem _deedItem(Dir side, IconData icon, String label, String unit) {
+    if (!game.canGrow(side)) {
+      return _ShopItem(
+        icon: icon,
+        title: 'Land deed · $label',
+        tag: 'MAX',
+        chip: 'claimed',
+        chipMuted: true,
+        enabled: false,
+        desc: 'Frontier fully claimed — the map is at its $label limit.',
+      );
+    }
+    return _ShopItem(
+      icon: icon,
+      title: 'Land deed · $label',
+      tag: _money(game.deedPrice),
+      chip: '\$${game.deedPrice}',
+      enabled: game.balance >= game.deedPrice,
+      desc:
+          '+${Game.expandStep} $unit of frontier, with fresh hills, water and trees. Price rises per deed.',
+      onTap: () => game.buyLand(side),
+    );
+  }
+
+  List<_ShopItem> _expand() => [
+        _deedItem(Dir.n, Icons.north_rounded, 'north', 'rows'),
+        _deedItem(Dir.s, Icons.south_rounded, 'south', 'rows'),
+        _deedItem(Dir.e, Icons.east_rounded, 'east', 'columns'),
+        _deedItem(Dir.w, Icons.west_rounded, 'west', 'columns'),
       ];
 
   @override
@@ -421,6 +410,9 @@ class _ShopPanelState extends State<ShopPanel> {
               const SizedBox(height: 10),
               _sectionLabel('TERRAFORM'),
               _grid(_terraform()),
+              const SizedBox(height: 10),
+              _sectionLabel('EXPAND'),
+              _grid(_expand()),
               const SizedBox(height: 12),
               _hintCard(),
             ],
