@@ -144,18 +144,57 @@ class Scenarios {
       ],
       build: _buildGorge,
     ),
-    const Scenario(
+    Scenario(
       id: 'ridge',
       name: 'WIDOWMAKER RIDGE',
       difficulty: 2,
-      blurb: 'A mountain wall with a single saddle — climb it, or bore '
-          'straight through.',
+      blurb: 'An impassable mountain wall splits the valleys — except at '
+          'one high saddle. Climb the pass, or bore straight through.',
+      facts: const ['START \$500', 'MAP 24×18', 'HIGH COUNTRY'],
+      missions: [
+        Mission(
+            'link',
+            'Link both valleys',
+            (g) =>
+                _routeVisits(g, (c) => c.x <= _ridgeWestMax) &&
+                _routeVisits(g, (c) => c.x >= _ridgeEastMin)),
+        Mission('summit', 'Serve the depot on the pass',
+            (g) => _buildingServed(g, _ridgePassDepot)),
+        Mission(
+            'thrift',
+            'Link the valleys having spent under \$1,200 '
+            '(Start over to retry)',
+            (g) =>
+                g.moneySpent <= 1200 &&
+                _routeVisits(g, (c) => c.x <= _ridgeWestMax) &&
+                _routeVisits(g, (c) => c.x >= _ridgeEastMin)),
+      ],
+      build: _buildRidge,
     ),
-    const Scenario(
+    Scenario(
       id: 'archipelago',
       name: 'ARCHIPELAGO',
       difficulty: 3,
-      blurb: 'Five islands, one lagoon, and almost no flat ground to spare.',
+      blurb: 'Five islands, one lagoon, and almost no flat ground to '
+          'spare. Bridge the narrows; fly the open water.',
+      facts: const ['START \$600', 'MAP 28×18', 'OPEN WATER'],
+      missions: [
+        Mission('triad', 'Connect three islands',
+            (g) => _islandsVisited(g) >= 3),
+        Mission(
+            'fullservice',
+            'Serve a building on every island',
+            (g) => _archIsles
+                .skip(1) // the home island has only the terminus
+                .every((isle) => _buildingServed(g, isle.building!))),
+        Mission(
+            'flotilla',
+            'Run two trains at once, no wrecks',
+            (g) =>
+                g.trains.length >= 2 &&
+                g.trains.every((t) => !t.wrecked && t.path != null)),
+      ],
+      build: _buildArchipelago,
     ),
     const Scenario(
       id: 'switchback',
@@ -196,8 +235,15 @@ void _loopWithStation(Game g,
   g.board[Cell(x1, y0)] = TrackKind.sw;
   g.board[Cell(x1, y1)] = TrackKind.nw;
   g.board[Cell(x0, y1)] = TrackKind.ne;
-  g.buildings.add(Building(
-      station, BuildingType.station, Cell(station.x, station.y - 1)));
+  Cell? trigger;
+  for (final d in Dir.values) {
+    final n = station.step(d);
+    if (g.board.containsKey(n)) {
+      trigger = n;
+      break;
+    }
+  }
+  g.buildings.add(Building(station, BuildingType.station, trigger));
 }
 
 void _scatter(Game g, math.Random rng, int count,
@@ -312,6 +358,126 @@ void _buildGorge(Game g) {
   _scatter(g, rng, 12, ok: (c) => !_inGorgeZone(c));
   _dropCows(g, rng, 2);
   g.balance = 400;
+}
+
+/// Any traced route (including launchpad flights) touches the zone.
+bool _routeVisits(Game g, bool Function(Cell) zone) {
+  for (final tr in g.trains) {
+    final p = tr.path;
+    if (p == null) continue;
+    for (final st in p) {
+      if (zone(st.cell)) return true;
+      final fly = st.flyTo;
+      if (fly != null && zone(fly)) return true;
+    }
+  }
+  return false;
+}
+
+/// The building at [at] exists, has a trigger, and some route passes it —
+/// i.e. its bonus actually fires.
+bool _buildingServed(Game g, Cell at) {
+  for (final b in g.buildings) {
+    if (b.cell != at) continue;
+    final t = b.trigger;
+    if (t == null) return false;
+    return g.trains.any((tr) => tr.path?.any((st) => st.cell == t) ?? false);
+  }
+  return false;
+}
+
+// ---- Widowmaker Ridge: a 2-step wall, one saddle, one bore line.
+
+const int _ridgeWestMax = 8; // west valley is x <= this
+const int _ridgeEastMin = 15; // east valley is x >= this
+const Cell _ridgePassDepot = Cell(11, 1);
+
+void _buildRidge(Game g) {
+  final rng = math.Random(7103);
+  g.cols = 24;
+  g.rows = 18;
+  g.heights.reset(g.cols, g.rows);
+  // The wall: vertex columns 11..13 rise 2/4/2, giving every face a
+  // two-step jump no straight can climb — impassable, but borable
+  // (portals sit flat at x=9 and x=14 with covered ground between).
+  for (var vy = 0; vy <= g.rows; vy++) {
+    g.heights.setVertex(11, vy, 2);
+    g.heights.setVertex(12, vy, 4);
+    g.heights.setVertex(13, vy, 2);
+  }
+  // The saddle: rows 1..3 drop the crest to a flat shelf at height 1,
+  // reachable by ordinary one-step climbs from both sides.
+  for (var vy = 1; vy <= 4; vy++) {
+    g.heights.setVertex(11, vy, 1);
+    g.heights.setVertex(12, vy, 1);
+    g.heights.setVertex(13, vy, 1);
+  }
+  _hill(g, 4, 15, 2);
+  _hill(g, 20, 15, 2);
+  _loopWithStation(g, x0: 2, y0: 6, x1: 6, y1: 10, station: const Cell(4, 11));
+  // The pass depot waits on the saddle shelf; the valley payouts wait east.
+  g.buildings.add(Building(_ridgePassDepot, BuildingType.depot));
+  g.buildings.add(Building(const Cell(18, 8), BuildingType.stop));
+  g.buildings.add(Building(const Cell(20, 12), BuildingType.depot));
+  _scatter(g, rng, 12, ok: (c) => c.x <= 8 || c.x >= 15);
+  _dropCows(g, rng, 1);
+  g.balance = 500;
+}
+
+// ---- Archipelago: five islands raised out of a drowned world.
+
+class _Isle {
+  final int x0, y0, x1, y1;
+  final Cell? building;
+  const _Isle(this.x0, this.y0, this.x1, this.y1, [this.building]);
+  bool contains(Cell c) =>
+      c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1;
+}
+
+const List<_Isle> _archIsles = [
+  _Isle(2, 6, 8, 11), // home — the terminus lives here
+  _Isle(11, 4, 14, 8, Cell(12, 6)),
+  _Isle(11, 12, 14, 15, Cell(12, 13)),
+  _Isle(18, 2, 21, 5, Cell(19, 3)),
+  _Isle(23, 10, 26, 14, Cell(24, 12)),
+];
+
+int _islandsVisited(Game g) {
+  var n = 0;
+  for (final isle in _archIsles) {
+    if (_routeVisits(g, isle.contains)) n++;
+  }
+  return n;
+}
+
+void _buildArchipelago(Game g) {
+  final rng = math.Random(7104);
+  g.cols = 28;
+  g.rows = 18;
+  g.heights.reset(g.cols, g.rows);
+  // Drown the world, then raise each island back to grade.
+  for (var vx = 0; vx <= g.cols; vx++) {
+    for (var vy = 0; vy <= g.rows; vy++) {
+      g.heights.setVertex(vx, vy, -1);
+    }
+  }
+  for (final isle in _archIsles) {
+    for (var vx = isle.x0; vx <= isle.x1 + 1; vx++) {
+      for (var vy = isle.y0; vy <= isle.y1 + 1; vy++) {
+        g.heights.setVertex(vx, vy, 0);
+      }
+    }
+  }
+  _loopWithStation(g, x0: 3, y0: 7, x1: 7, y1: 10, station: const Cell(5, 6));
+  for (final isle in _archIsles) {
+    final b = isle.building;
+    if (b == null) continue;
+    final type =
+        _archIsles.indexOf(isle).isEven ? BuildingType.depot : BuildingType.stop;
+    g.buildings.add(Building(b, type));
+  }
+  _scatter(g, rng, 8, ok: (c) => _archIsles.any((i) => i.contains(c)));
+  g.balance = 600;
 }
 
 bool _gorgeSpansBanks(Game g) {

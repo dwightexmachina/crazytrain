@@ -1030,6 +1030,97 @@ void main() {
       expect(resumed.balance, 300);
     });
 
+    test('ridge wall is impassable except the saddle, and borable', () {
+      final g = scenarioGame('ridge');
+      expect(g.path, isNotNull);
+      g.balance = 100000;
+      // A straight shot across the wall mid-map dies on the two-step faces…
+      final blocked = g.planTrack([for (var x = 8; x <= 15; x++) Cell(x, 9)]);
+      expect(blocked.pieces.length, lessThan(4));
+      // …but the router discovers the saddle up north on its own.
+      final route = g.routeTrack(const Cell(7, 9), const Cell(16, 9));
+      expect(route, isNotNull);
+      expect(route!.any((c) => c.y <= 3), isTrue,
+          reason: 'crosses via the pass');
+      // And the wall takes a bore at portal grade.
+      expect(g.boreError(const Cell(9, 9), const Cell(14, 9)), isNull);
+    });
+
+    test('ridge missions: link, summit depot, and the budget', () {
+      final g = scenarioGame('ridge');
+      g.balance = 100000;
+      for (var y = 6; y <= 10; y++) {
+        g.bulldoze(Cell(6, y));
+      }
+      // One detour: over the saddle at y=2 past the pass depot, a taste of
+      // the east valley, and back through the saddle again at y=3 — the
+      // wall's only crossing works both ways.
+      final detour = g.planTrack([
+        const Cell(5, 6),
+        for (var y = 6; y >= 2; y--) Cell(6, y),
+        for (var x = 7; x <= 16; x++) Cell(x, 2),
+        const Cell(16, 3),
+        for (var x = 15; x >= 7; x--) Cell(x, 3),
+        for (var y = 4; y <= 10; y++) Cell(7, y),
+        const Cell(6, 10),
+        const Cell(5, 10),
+      ]);
+      expect(detour.truncatedByFunds, isFalse);
+      g.commitTrack(detour);
+      expect(g.path, isNotNull, reason: 'loop must close over the pass');
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, containsAll(['link', 'summit', 'thrift']),
+          reason: 'the saddle route also fits the \$1,200 budget');
+    });
+
+    test('archipelago builds five dry islands in a wet lagoon', () {
+      final g = scenarioGame('archipelago');
+      expect(g.path, isNotNull);
+      expect(g.isWater(const Cell(9, 8)), isTrue); // strait east of home
+      expect(g.isWater(const Cell(12, 6)), isFalse); // isle B ground
+      expect(g.buildings.length, 5); // terminus + one per outer island
+      expect(g.cows, isEmpty);
+    });
+
+    test('archipelago missions: three islands and the flotilla', () {
+      final g = scenarioGame('archipelago');
+      g.balance = 100000;
+      for (var y = 7; y <= 10; y++) {
+        g.bulldoze(Cell(7, y));
+      }
+      // The return leg enters the bottom edge from the north, so its
+      // corner must be rebuilt as a curve rather than kept as a straight.
+      g.bulldoze(const Cell(6, 10));
+      // Bridge east to isle B, south to isle C, and back home.
+      final detour = g.planTrack([
+        const Cell(6, 7),
+        for (var x = 7; x <= 13; x++) Cell(x, 7),
+        for (var y = 8; y <= 14; y++) Cell(13, y),
+        for (var x = 12; x >= 6; x--) Cell(x, 14),
+        for (var y = 13; y >= 10; y--) Cell(6, y),
+      ]);
+      expect(detour.truncatedByFunds, isFalse);
+      g.commitTrack(detour);
+      expect(g.path, isNotNull);
+      g.armSecondTrain();
+      expect(g.placeSecondTrain(const Cell(5, 7)), isNull);
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, containsAll(['triad', 'flotilla']));
+      expect(g.missionsDone.contains('fullservice'), isFalse,
+          reason: 'the far islands are still unserved');
+    });
+
+    test('moneySpent counts purchases and ignores refunds', () {
+      final g = flatGame();
+      g.balance = 1000;
+      final before = g.moneySpent;
+      final plan = g.planTrack(const [Cell(4, 1), Cell(5, 1), Cell(6, 1)]);
+      g.commitTrack(plan);
+      expect(g.moneySpent, before + plan.cost);
+      g.bulldoze(const Cell(5, 1)); // refund must not reduce spend
+      expect(g.moneySpent, before + plan.cost);
+    });
+
     test('the final star fires LINE CLEAR exactly once', () {
       final g = scenarioGame('prairie');
       g.balance = 2500;
