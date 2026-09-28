@@ -547,37 +547,60 @@ class Game extends ChangeNotifier {
     return 1;
   }
 
+  /// Rail height the connector across [c]'s [d] edge presents at the shared
+  /// joint, or null when nothing there can host one: open track ends and
+  /// switch legs (deck-aware via railEdgeZ), a tunnel portal's outward
+  /// mouth, or any side of a launchpad.
+  double? _connectorLevel(Cell c, Dir d) {
+    final n = c.step(d);
+    if (!inBounds(n)) return null;
+    final back = d.opposite;
+    final piece = board[n];
+    final sw = switches[n];
+    final partner = tunnels[n];
+    if (piece != null) {
+      if (!piece.conn.contains(back)) return null;
+      return railEdgeZ(n, back);
+    }
+    if (sw != null) {
+      if (back != sw.base && back != sw.branchA && back != sw.branchB) {
+        return null;
+      }
+      return railEdgeZ(n, back);
+    }
+    if (partner != null) {
+      if (back != axisDir(n, partner)!.opposite) return null; // mouth side
+      return heights.floorOf(n).toDouble();
+    }
+    if (launchpads.containsKey(n)) return heights.floorOf(n).toDouble();
+    return null;
+  }
+
+  /// The deck grade a new bridge piece at wet [c] can inherit from an
+  /// adjacent connector — this is what lets a run *begin* on open water
+  /// beside a bridge end instead of only continuing from a bank.
+  int? _adjacentConnectorDeck(Cell c) {
+    for (final d in Dir.values) {
+      final lv = _connectorLevel(c, d);
+      if (lv == null) continue;
+      final r = lv.round();
+      if ((lv - r).abs() < 0.01) return r;
+    }
+    return null;
+  }
+
   /// Edges of [c] with a connector on the far side ready to join new track
-  /// at matching rail height: open track ends, switch legs, a tunnel
-  /// portal's outward mouth, or any side of a launchpad.
-  Set<Dir> connectionOffers(Cell c) {
+  /// at matching rail height. [railLevel] overrides this cell's own edge
+  /// height — used when planning a bridge deck over water, where the
+  /// terrain edges are submerged but the rail will ride the deck.
+  Set<Dir> connectionOffers(Cell c, {double? railLevel}) {
     final out = <Dir>{};
     for (final d in Dir.values) {
-      final n = c.step(d);
-      if (!inBounds(n)) continue;
-      final myEdge = _edgeLevel(c, d);
+      final theirs = _connectorLevel(c, d);
+      if (theirs == null) continue;
+      final myEdge =
+          railLevel ?? deck[c]?.toDouble() ?? _edgeLevel(c, d)?.toDouble();
       if (myEdge == null) continue; // a side-sloped edge can't host a joint
-      final back = d.opposite;
-      final double theirs;
-      final piece = board[n];
-      final sw = switches[n];
-      final partner = tunnels[n];
-      if (piece != null) {
-        if (!piece.conn.contains(back)) continue;
-        theirs = railEdgeZ(n, back);
-      } else if (sw != null) {
-        if (back != sw.base && back != sw.branchA && back != sw.branchB) {
-          continue;
-        }
-        theirs = railEdgeZ(n, back);
-      } else if (partner != null) {
-        if (back != axisDir(n, partner)!.opposite) continue; // mouth side only
-        theirs = heights.floorOf(n).toDouble();
-      } else if (launchpads.containsKey(n)) {
-        theirs = heights.floorOf(n).toDouble();
-      } else {
-        continue;
-      }
       if ((theirs - myEdge).abs() > 0.01) continue;
       out.add(d);
     }
@@ -587,8 +610,8 @@ class Game extends ChangeNotifier {
   /// Orientation for a drag endpoint ([leg] = its one known direction) or a
   /// single tap ([leg] null): snap toward adjacent connectors when a valid
   /// piece results, else fall back to the drag axis (or EW for a tap).
-  TrackKind _endpointKind(Cell c, Dir? leg) {
-    final offers = connectionOffers(c);
+  TrackKind _endpointKind(Cell c, Dir? leg, {double? railLevel}) {
+    final offers = connectionOffers(c, railLevel: railLevel);
     if (leg != null) {
       final ahead = leg.opposite; // straight through, continuing the motion
       if (offers.contains(ahead)) return TrackKind.fromDirs(leg, ahead)!;
@@ -635,6 +658,16 @@ class Game extends ChangeNotifier {
       Dir? toPrev = i > 0 ? _dirBetween(c, cells[i - 1]) : null;
       Dir? toNext = i < cells.length - 1 ? _dirBetween(c, cells[i + 1]) : null;
       if (i > 0 && toPrev == null) break; // non-adjacent jump: stop
+      // Grade rules: bridges deck flat over water at the grade they were
+      // entered from — or, at a run's start, at the grade an adjacent
+      // connector offers; curves need flat ground; straights may climb one
+      // step per cell along their axis, never across a side-slope.
+      final wet = isWater(c);
+      int? wetLvl;
+      if (wet) {
+        wetLvl = deck[c] ?? prevExit ?? _adjacentConnectorDeck(c);
+        if (wetLvl == null) break; // open water with no grade to inherit
+      }
       TrackKind kind;
       if (toPrev != null && toNext != null) {
         final k = TrackKind.fromDirs(toPrev, toNext);
@@ -642,18 +675,13 @@ class Game extends ChangeNotifier {
         kind = k;
       } else {
         // Endpoints and taps snap toward whatever wants to connect.
-        kind = _endpointKind(c, toPrev ?? toNext);
+        kind = _endpointKind(c, toPrev ?? toNext,
+            railLevel: wet ? wetLvl!.toDouble() : null);
       }
 
-      // Grade rules: bridges deck flat over water at the grade they were
-      // entered from; curves need flat ground; straights may climb one step
-      // per cell along their axis, never across a side-slope.
-      final wet = isWater(c);
       final int entryH, exitH;
       if (wet) {
-        final lvl = deck[c] ?? prevExit;
-        if (lvl == null) break; // can't begin a bridge over open water
-        entryH = exitH = lvl;
+        entryH = exitH = wetLvl!;
       } else if (kind.isCurve) {
         if (!heights.isFlat(c)) break;
         entryH = exitH = heights.floorOf(c);
@@ -717,20 +745,34 @@ class Game extends ChangeNotifier {
 
     // Legality + price of the piece at [c] entered from [toPrev] (edge
     // toward the previous cell; null at the anchor) and left via [toNext],
-    // arriving at rail height [entryH]. Mirrors planTrack's rules.
+    // arriving at rail height [entryH]. Mirrors planTrack's rules,
+    // including its endpoint snapping: an anchor on existing track rides
+    // that piece out along its own connections, an empty anchor snaps
+    // toward adjacent connectors, and a wet anchor inherits its deck grade
+    // from a neighboring connector.
     (int exitH, int price)? piece(Cell c, Dir? toPrev, Dir toNext, int? entryH) {
-      final kind = toPrev == null
-          ? ((toNext == Dir.e || toNext == Dir.w) ? TrackKind.ew : TrackKind.ns)
-          : TrackKind.fromDirs(toPrev, toNext);
-      if (kind == null) return null;
       final existing = board[c];
-      if (existing != null && existing != kind) return null;
       final wet = isWater(c);
+      int? wetLvl;
+      if (wet) {
+        wetLvl = deck[c] ?? entryH ?? _adjacentConnectorDeck(c);
+        if (wetLvl == null) return null; // open water, no grade to inherit
+      }
+      final TrackKind? kind;
+      if (toPrev != null) {
+        kind = TrackKind.fromDirs(toPrev, toNext);
+      } else if (existing != null) {
+        if (!existing.conn.contains(toNext)) return null;
+        kind = existing; // leave the anchor piece along its own alignment
+      } else {
+        kind = _endpointKind(c, toNext,
+            railLevel: wet ? wetLvl!.toDouble() : null);
+      }
+      if (kind == null) return null;
+      if (existing != null && existing != kind) return null;
       final int eIn, eOut;
       if (wet) {
-        final lvl = deck[c] ?? entryH;
-        if (lvl == null) return null; // can't begin a bridge over open water
-        eIn = eOut = lvl;
+        eIn = eOut = wetLvl!;
       } else if (kind.isCurve) {
         if (!heights.isFlat(c)) return null;
         eIn = eOut = heights.floorOf(c);
@@ -812,6 +854,15 @@ class Game extends ChangeNotifier {
       final (_, _, g, c, toPrev, h) = pop();
       final ck = key(c, toPrev, h);
       if (g > (gScore[ck] ?? 1 << 30)) continue; // stale heap entry
+      // Lock onto existing track at the target: only arrivals facing one of
+      // its open connections count; other approaches keep searching.
+      final targetPiece = board[to];
+      if (c == to &&
+          targetPiece != null &&
+          toPrev != null &&
+          !targetPiece.conn.contains(toPrev)) {
+        continue;
+      }
       if (c == to) {
         // Reconstruct the cell chain; planTrack finalizes endpoint kinds.
         final cells = <Cell>[c];

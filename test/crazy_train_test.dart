@@ -1102,6 +1102,59 @@ void main() {
           reason: 'anchor alone still previews as a tap');
     });
 
+    test('a bridge gap can be closed from either end or the gap itself', () {
+      final g = flatGame();
+      g.balance = 100000;
+      for (final x in [5, 6, 7]) {
+        sink(g, Cell(x, 1));
+      }
+      // Two bridge stubs reach in from both banks; (6,1) is the wet gap.
+      g.commitTrack(g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(5, 1)]));
+      g.commitTrack(g.planTrack(const [Cell(9, 1), Cell(8, 1), Cell(7, 1)]));
+      expect(g.deck[const Cell(5, 1)], 0);
+      expect(g.deck[const Cell(7, 1)], 0);
+      // Tapping the gap alone inherits the neighboring deck grade.
+      final tap = g.planTrack(const [Cell(6, 1)]);
+      expect(tap.pieces, hasLength(1));
+      expect(tap.pieces.single.bridge, isTrue);
+      expect(tap.pieces.single.deckLevel, 0);
+      // Routing end to end covers the whole crossing.
+      final route = g.routeTrack(const Cell(5, 1), const Cell(7, 1));
+      expect(route, const [Cell(5, 1), Cell(6, 1), Cell(7, 1)]);
+      final plan = g.planTrack(route!);
+      expect(plan.pieces.length, 3);
+      g.commitTrack(plan);
+      expect(g.board[const Cell(6, 1)], TrackKind.ew);
+    });
+
+    test('anchoring on an existing curve end routes out along its legs', () {
+      final g = flatGame();
+      g.balance = 100000;
+      g.commitTrack(g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(4, 2)]));
+      expect(g.board[const Cell(4, 1)]!.isCurve, isTrue);
+      // The old router modeled the anchor as a bare straight, so pressing
+      // on a curve end (the screenshot's hairpin) found no route at all.
+      final route = g.routeTrack(const Cell(4, 1), const Cell(7, 1));
+      expect(route, isNotNull);
+      final plan = g.planTrack(route!);
+      expect(plan.pieces.length, route.length);
+      expect(plan.pieces.first.cost, 0, reason: 'rides the curve for free');
+    });
+
+    test('routing into existing track arrives at an open connection', () {
+      final g = flatGame();
+      g.balance = 100000;
+      g.commitTrack(g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(4, 2)]));
+      // Target the curve itself: it only connects w and s, so the straight
+      // shot along row 1 (arriving from the east) must be rejected and the
+      // route has to come around through the adjoining track at (3,1).
+      final route = g.routeTrack(const Cell(7, 1), const Cell(4, 1))!;
+      expect(route[route.length - 2], const Cell(3, 1),
+          reason: 'locks onto the open leg, never rams the closed corner');
+      final plan = g.planTrack(route);
+      expect(plan.pieces.length, route.length);
+    });
+
     test('routes bridge across the gorge and the plan prices it', () {
       web.window.localStorage.clear();
       final g = Game(scenario: Scenarios.byId('gorge'), resume: false);
