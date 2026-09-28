@@ -843,6 +843,32 @@ class Game extends ChangeNotifier {
     return true;
   }
 
+  String? _portalSiteError(Cell c) {
+    if (tunnels.containsKey(c)) return 'Already a tunnel portal';
+    if (board.containsKey(c) || switches.containsKey(c)) {
+      return 'Remove the track first';
+    }
+    if (_cellBlocked(c) || launchpads.containsKey(c)) return 'Cell occupied';
+    if (isWater(c)) return "Can't bore from water";
+    if (!heights.isFlat(c)) return 'Portals need flat ground';
+    return null;
+  }
+
+  /// Why a bore from [from] to [to] is impossible, or null when it's valid.
+  /// Drives both placement and the live preview line.
+  String? boreError(Cell from, Cell to) {
+    final site = _portalSiteError(to);
+    if (site != null) return site;
+    if (axisDir(from, to) == null) return 'Portals must line up';
+    final dist = (to.x - from.x).abs() + (to.y - from.y).abs();
+    if (dist < 2) return 'Too close — nothing to bore through';
+    if (heights.floorOf(to) != heights.floorOf(from)) {
+      return 'Portal heights must match';
+    }
+    if (!_boreCovered(from, to)) return 'No mountain to bore through';
+    return null;
+  }
+
   /// Two-tap placement: first tap arms a portal, second tap bores to it.
   /// Tapping the armed portal again cancels. Returns an error, or null.
   String? tapTunnel(Cell c) {
@@ -853,26 +879,16 @@ class Game extends ChangeNotifier {
       notifyListeners();
       return null;
     }
-    if (tunnels.containsKey(c)) return 'Already a tunnel portal';
-    if (board.containsKey(c) || switches.containsKey(c)) {
-      return 'Remove the track first';
-    }
-    if (_cellBlocked(c) || launchpads.containsKey(c)) return 'Cell occupied';
-    if (isWater(c)) return "Can't bore from water";
-    if (!heights.isFlat(c)) return 'Portals need flat ground';
     if (balance < priceTunnel) return 'Not enough money';
     if (first == null) {
+      final site = _portalSiteError(c);
+      if (site != null) return site;
       pendingTunnel = c;
       notifyListeners();
       return null;
     }
-    if (axisDir(first, c) == null) return 'Portals must line up';
-    final dist = (c.x - first.x).abs() + (c.y - first.y).abs();
-    if (dist < 2) return 'Too close — nothing to bore through';
-    if (heights.floorOf(c) != heights.floorOf(first)) {
-      return 'Portal heights must match';
-    }
-    if (!_boreCovered(first, c)) return 'No mountain to bore through';
+    final err = boreError(first, c);
+    if (err != null) return err;
     balance -= priceTunnel;
     tunnels[first] = c;
     tunnels[c] = first;

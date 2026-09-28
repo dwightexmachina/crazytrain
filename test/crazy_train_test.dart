@@ -625,6 +625,9 @@ void main() {
       expect(g.tapTunnel(const Cell(6, 1)), 'Portals need flat ground');
       expect(g.tapTunnel(const Cell(3, 1)),
           'No mountain to bore through'); // open ground west of the portal
+      // boreError powers the live preview: green means it would link.
+      expect(g.boreError(const Cell(5, 1), const Cell(8, 1)), isNull);
+      expect(g.boreError(const Cell(5, 1), const Cell(9, 0)), isNotNull);
     });
 
     test('traceLoop dives through a portal pair, sideways entry derails', () {

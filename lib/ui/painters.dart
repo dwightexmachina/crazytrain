@@ -702,17 +702,48 @@ class DynamicPainter extends CustomPainter {
           opacity: 0.55, z: hf.centerZ(pending) * kZStep);
     }
 
+    List<Offset> cellQuad(Cell q) {
+      final (a, b, d, e) = hf.corners(q);
+      return [
+        v.pt(q.x.toDouble(), q.y.toDouble(), a * kZStep),
+        v.pt(q.x + 1.0, q.y.toDouble(), b * kZStep),
+        v.pt(q.x + 1.0, q.y + 1.0, d * kZStep),
+        v.pt(q.x.toDouble(), q.y + 1.0, e * kZStep),
+      ];
+    }
+
+    // Boring a tunnel: faint guides along the armed portal's row and
+    // column, and a live bore preview to the hovered cell — green when the
+    // link would take, red when it wouldn't.
+    final portal = game.pendingTunnel;
+    if (portal != null && game.tool == Tool.tunnel) {
+      final guide = Pal.accent.withValues(alpha: 0.10);
+      for (var x = 0; x < game.cols; x++) {
+        if (x != portal.x) _face(c, guide, cellQuad(Cell(x, portal.y)));
+      }
+      for (var y = 0; y < game.rows; y++) {
+        if (y != portal.y) _face(c, guide, cellQuad(Cell(portal.x, y)));
+      }
+      final target = hover.value;
+      if (target != null && target != portal &&
+          axisDir(portal, target) != null) {
+        final ok = game.boreError(portal, target) == null;
+        final tint = ok ? Pal.ghostOk : Pal.ghostBad;
+        final dx = (target.x - portal.x).sign, dy = (target.y - portal.y).sign;
+        var cur = portal;
+        while (true) {
+          _face(c, tint, cellQuad(cur));
+          if (cur == target) break;
+          cur = Cell(cur.x + dx, cur.y + dy);
+        }
+      }
+    }
+
     // Armed track piece awaiting its switch base-side tap, or an armed
     // first tunnel portal.
     for (final ps in [game.pendingSwitch, game.pendingTunnel]) {
       if (ps == null) continue;
-      final (a, b, d, e) = hf.corners(ps);
-      _face(c, Pal.ghostOk, [
-        v.pt(ps.x.toDouble(), ps.y.toDouble(), a * kZStep),
-        v.pt(ps.x + 1.0, ps.y.toDouble(), b * kZStep),
-        v.pt(ps.x + 1.0, ps.y + 1.0, d * kZStep),
-        v.pt(ps.x.toDouble(), ps.y + 1.0, e * kZStep),
-      ]);
+      _face(c, Pal.ghostOk, cellQuad(ps));
     }
 
     _drawTrain(c, v);
