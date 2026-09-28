@@ -527,7 +527,7 @@ class _ShopPanelState extends State<ShopPanel> {
   Widget _hintCard() {
     final String hint = switch (game.tool) {
       Tool.track =>
-        'Drag across the board to lay track. Corners become curves automatically. Release to build.',
+        'Drag across the board to lay track. Corners become curves automatically. Straights climb one step per cell; curves need flat ground. Trains slow uphill and speed downhill.',
       Tool.stop || Tool.depot =>
         'Tap an empty cell next to your track. It pays its bonus every time the train passes.',
       Tool.bulldoze => 'Tap or drag over track and buildings to remove them.',

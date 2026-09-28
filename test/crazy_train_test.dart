@@ -151,7 +151,7 @@ void main() {
       expect(g.sculpt(const Cell(1, 1), const Offset(0.2, 0.2), 1), isNull);
     });
 
-    test('rail refuses uneven ground and level changes between plateaus', () {
+    test('straight rail climbs a one-step ramp onto a plateau', () {
       final g = flatGame();
       g.balance = 100000;
       // Build a one-step plateau covering cells around (5,1)..(6,1).
@@ -160,10 +160,39 @@ void main() {
       }
       expect(g.heights.isFlat(const Cell(5, 1)), isTrue);
       expect(g.heights.floorOf(const Cell(5, 1)), 1);
-      // A drag from ground level onto the plateau stops at the seam.
+      // Flat approach, graded ramp cell, flat summit: all three lay.
       final plan =
           g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(5, 1)]);
-      expect(plan.pieces.length, lessThan(3));
+      expect(plan.pieces.length, 3);
+      g.commitTrack(plan);
+      // The ramp's rail rises from its west edge to its east edge.
+      expect(g.railEdgeZ(const Cell(4, 1), Dir.w), 0);
+      expect(g.railEdgeZ(const Cell(4, 1), Dir.e), 1);
+      // Climbing costs time; coasting down gives it back; flat is neutral.
+      expect(g.stepCost(PathStep(const Cell(4, 1), Dir.w, Dir.e)), 1.35);
+      expect(g.stepCost(PathStep(const Cell(4, 1), Dir.e, Dir.w)), 0.75);
+      expect(g.stepCost(PathStep(const Cell(3, 1), Dir.w, Dir.e)), 1);
+      // A graded piece can't become a switch.
+      expect(g.tapSwitch(const Cell(4, 1)), 'Switches need flat ground');
+    });
+
+    test('curves, side-slopes and cliffs refuse rail', () {
+      final g = flatGame();
+      g.balance = 100000;
+      for (final v in const [(5, 1), (6, 1), (5, 2), (6, 2)]) {
+        g.sculpt(Cell(v.$1, v.$2), const Offset(0.2, 0.2), 1);
+      }
+      // A curve landing on the ramp cell breaks the run.
+      final curve = g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(4, 2)]);
+      expect(curve.pieces.length, 1);
+      // Travelling across the slope (side-slope under the rail) refuses.
+      final side = g.planTrack(const [Cell(4, 0), Cell(5, 0), Cell(6, 0)]);
+      expect(side.isEmpty, isTrue);
+      // A two-step cliff is too steep to climb.
+      g.heights.setVertex(9, 1, 2);
+      g.heights.setVertex(9, 2, 2);
+      final cliff = g.planTrack(const [Cell(7, 1), Cell(8, 1)]);
+      expect(cliff.pieces.length, 1);
     });
 
     test('v2 mountains migrate into raised peaks', () {

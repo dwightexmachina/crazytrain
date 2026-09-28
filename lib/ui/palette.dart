@@ -47,6 +47,7 @@ abstract final class Pal {
   static const water = Color(0xFFB7D2DC);
   static const waterEdge = Color(0xFF9DBEC9);
   static const plank = Color(0xFFA98F6C);
+  static const trestle = Color(0xFF8F7758);
   static const lever = (Color(0xFFD97757), Color(0xFFB35C42), Color(0xFFC4694C));
   static const pad = (Color(0xFFC9BCE0), Color(0xFFA091BC), Color(0xFFB4A6CE));
   static const padRing = Color(0xFFF7F4FC);

@@ -137,10 +137,25 @@ List<Offset> trackPolyline(Cell cell, TrackKind kind) {
   return connPolyline(cell, dirs[0], dirs[1]);
 }
 
+/// Cumulative arc-length fraction (0..1) of each polyline point.
+List<double> _arcFractions(List<Offset> pts) {
+  final acc = List<double>.filled(pts.length, 0);
+  var total = 0.0;
+  for (var i = 1; i < pts.length; i++) {
+    total += (pts[i] - pts[i - 1]).distance;
+    acc[i] = total;
+  }
+  if (total == 0) return acc;
+  return [for (final a in acc) a / total];
+}
+
 void _strokePolyline(Canvas c, IsoView v, List<Offset> plane, double width,
-    Color color, double z) {
+    Color color, double z0, [double? z1]) {
+  final zEnd = z1 ?? z0;
+  final fr = z0 == zEnd ? null : _arcFractions(plane);
   final path = Path();
   for (var i = 0; i < plane.length; i++) {
+    final z = fr == null ? z0 : z0 + (zEnd - z0) * fr[i];
     final p = v.pt(plane[i].dx, plane[i].dy, z);
     i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
   }
@@ -168,21 +183,29 @@ List<Offset> _offsetPolyline(List<Offset> pts, double d) {
   return out;
 }
 
+/// The polyline starts at the first conn-dir edge; [z] is the rail height
+/// there and [zEnd] (default: same) at the far edge, so straights can climb.
 void drawTrackCell(Canvas c, IsoView v, Cell cell, TrackKind kind,
-    {double opacity = 1, bool bridge = false, double z = 0}) {
+    {double opacity = 1, bool bridge = false, double z = 0, double? zEnd}) {
   drawTrackLine(c, v, trackPolyline(cell, kind),
-      opacity: opacity, bridge: bridge, z: z);
+      opacity: opacity, bridge: bridge, z: z, zEnd: zEnd);
 }
 
 void drawTrackLine(Canvas c, IsoView v, List<Offset> line,
-    {double opacity = 1, bool bridge = false, double z = 0}) {
+    {double opacity = 1, bool bridge = false, double z = 0, double? zEnd}) {
+  final z1 = zEnd ?? z;
   Color fade(Color col) => col.withValues(alpha: col.a * opacity);
   if (bridge) {
     // Plank deck spanning the water, wider than the ballast bed.
-    _strokePolyline(c, v, line, 0.52 * v.s, fade(Pal.plank), z);
+    _strokePolyline(c, v, line, 0.52 * v.s, fade(Pal.plank), z, z1);
   }
-  _strokePolyline(c, v, line, 0.34 * v.s, fade(Pal.bed), z);
+  _strokePolyline(c, v, line, 0.34 * v.s, fade(Pal.bed), z, z1);
   // Ties.
+  final fr = _arcFractions(line);
+  var total = 0.0;
+  for (var i = 1; i < line.length; i++) {
+    total += (line[i] - line[i - 1]).distance;
+  }
   var dist = 0.12;
   var acc = 0.0;
   for (var i = 1; i < line.length; i++) {
@@ -193,14 +216,48 @@ void drawTrackLine(Canvas c, IsoView v, List<Offset> line,
       final p = line[i - 1] + seg * t;
       final dir = seg / segLen;
       final n = Offset(-dir.dy, dir.dx);
-      _strokePolyline(c, v, [p - n * 0.20, p + n * 0.20], 0.055 * v.s, fade(Pal.tie), z);
+      final tieZ = total == 0
+          ? z
+          : z + (z1 - z) * ((fr[i - 1] + (fr[i] - fr[i - 1]) * t));
+      _strokePolyline(
+          c, v, [p - n * 0.20, p + n * 0.20], 0.055 * v.s, fade(Pal.tie), tieZ);
       dist += 0.24;
     }
     acc += segLen;
   }
   // Rails.
   for (final side in const [-0.115, 0.115]) {
-    _strokePolyline(c, v, _offsetPolyline(line, side), 0.045 * v.s, fade(Pal.rail), z);
+    _strokePolyline(
+        c, v, _offsetPolyline(line, side), 0.045 * v.s, fade(Pal.rail), z, z1);
+  }
+}
+
+/// Trestle posts from a bridge deck down to the terrain (or riverbed).
+void drawTrestles(Canvas c, IsoView v, Cell cell, TrackKind kind, double deckZ) {
+  final line = trackPolyline(cell, kind);
+  final hf = v.game.heights;
+  for (final t in const [0.3, 0.7]) {
+    final i = ((line.length - 1) * t).round();
+    final p = line[i];
+    final groundZ =
+        math.min(hf.zAt(p), HeightField.waterLevel - 0.35) * kZStep;
+    if (deckZ - groundZ < 0.12) continue;
+    final seg = line[math.min(i + 1, line.length - 1)] -
+        line[math.max(0, i - 1)];
+    final len = seg.distance;
+    final n = len == 0 ? Offset.zero : Offset(-seg.dy, seg.dx) / len;
+    for (final side in const [-0.15, 0.15]) {
+      final q = p + n * side;
+      final a = v.pt(q.dx, q.dy, deckZ);
+      final b = v.pt(q.dx, q.dy, groundZ);
+      c.drawLine(
+          a,
+          b,
+          Paint()
+            ..color = Pal.trestle
+            ..strokeWidth = 0.06 * v.s
+            ..strokeCap = StrokeCap.round);
+    }
   }
 }
 
@@ -417,13 +474,18 @@ class StaticBoardPainter extends CustomPainter {
         // Grid on the surface.
         c.drawPath(Path()..addPolygon([q0, q1, q2, q3], true), gridPaint);
 
-        // Structures riding this cell. Rail over water sits on its deck.
+        // Structures riding this cell. Rail follows its edge grades; decks
+        // span water on trestles.
         final flatZ = ha * kZStep;
         final railZ = (game.deck[cell] ?? ha) * kZStep;
         final piece = game.board[cell];
         if (piece != null) {
+          final dirs = piece.conn.toList();
+          final zA = game.railEdgeZ(cell, dirs[0]) * kZStep;
+          final zB = game.railEdgeZ(cell, dirs[1]) * kZStep;
+          if (game.isWater(cell)) drawTrestles(c, v, cell, piece, zA);
           drawTrackCell(c, v, cell, piece,
-              bridge: game.isWater(cell), z: railZ);
+              bridge: game.isWater(cell), z: zA, zEnd: zB);
         }
         final sw = game.switches[cell];
         if (sw != null) drawSwitch(c, v, sw, bridge: game.isWater(cell), z: railZ);
@@ -495,15 +557,23 @@ class DynamicPainter extends CustomPainter {
       ]);
     }
 
-    // Drag ghost. Bridge pieces preview at their deck grade.
+    // Drag ghost. Bridges preview at deck grade, straights at their slope.
     final pl = plan.value;
     if (pl != null) {
       for (final p in pl.pieces) {
-        final z = p.deckLevel != null
-            ? p.deckLevel!.toDouble()
-            : (game.deck[p.cell]?.toDouble() ?? hf.centerZ(p.cell));
+        final double za, zb;
+        if (p.deckLevel != null) {
+          za = zb = p.deckLevel!.toDouble();
+        } else {
+          final dirs = p.kind.conn.toList();
+          za = game.railEdgeZ(p.cell, dirs[0]);
+          zb = game.railEdgeZ(p.cell, dirs[1]);
+        }
         drawTrackCell(c, v, p.cell, p.kind,
-            opacity: 0.55, bridge: p.bridge, z: z * kZStep);
+            opacity: 0.55,
+            bridge: p.bridge,
+            z: za * kZStep,
+            zEnd: zb * kZStep);
       }
     }
 
@@ -566,15 +636,18 @@ class DynamicPainter extends CustomPainter {
       final heading = st.headingAt(t, 1.0);
       // Ground level under this vehicle; airborne steps lerp pad-to-pad
       // and add the launch arc on top.
-      double railGround(Cell cell) =>
-          game.deck[cell]?.toDouble() ?? hf.centerZ(cell);
       double groundZ;
       final fly = st.flyTo;
       if (fly != null) {
-        final za = railGround(st.cell), zb = railGround(fly);
+        double padZ(Cell cell) =>
+            game.deck[cell]?.toDouble() ?? hf.centerZ(cell);
+        final za = padZ(st.cell), zb = padZ(fly);
         groundZ = (za + (zb - za) * t) * kZStep;
       } else {
-        groundZ = railGround(st.cell) * kZStep;
+        // Rail height interpolates entry-edge to exit-edge: hills for real.
+        final za = game.railEdgeZ(st.cell, st.entry);
+        final zb = game.railEdgeZ(st.cell, st.exit);
+        groundZ = (za + (zb - za) * t) * kZStep;
       }
       final z = groundZ + st.flightZ(t);
       final horiz = math.cos(heading).abs() > math.sin(heading).abs();

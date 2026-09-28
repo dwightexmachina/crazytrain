@@ -381,6 +381,39 @@ class Game extends ChangeNotifier {
       (kind.isCurve ? priceCurve : priceStraight) +
       (isWater(c) ? priceBridge : 0);
 
+  /// The two lattice vertices bounding a cell's [d] edge.
+  ((int, int), (int, int)) _edgeVerts(Cell c, Dir d) => switch (d) {
+        Dir.n => ((c.x, c.y), (c.x + 1, c.y)),
+        Dir.s => ((c.x, c.y + 1), (c.x + 1, c.y + 1)),
+        Dir.e => ((c.x + 1, c.y), (c.x + 1, c.y + 1)),
+        Dir.w => ((c.x, c.y), (c.x, c.y + 1)),
+      };
+
+  /// Height of a cell edge when it's level, else null (side-slope).
+  int? _edgeLevel(Cell c, Dir d) {
+    final (a, b) = _edgeVerts(c, d);
+    final h1 = heights.vAt(a.$1, a.$2), h2 = heights.vAt(b.$1, b.$2);
+    return h1 == h2 ? h1 : null;
+  }
+
+  /// Rail height at a cell's [d] edge: the bridge deck when present, else
+  /// the terrain edge midpoint. Drives train z and track rendering.
+  double railEdgeZ(Cell c, Dir d) {
+    final dk = deck[c];
+    if (dk != null) return dk.toDouble();
+    final (a, b) = _edgeVerts(c, d);
+    return (heights.vAt(a.$1, a.$2) + heights.vAt(b.$1, b.$2)) / 2;
+  }
+
+  /// Time cost of one path step: climbing is slow, descending is quick.
+  double stepCost(PathStep st) {
+    if (st.flyTo != null) return 1;
+    final g = railEdgeZ(st.cell, st.exit) - railEdgeZ(st.cell, st.entry);
+    if (g > 0.01) return 1.35;
+    if (g < -0.01) return 0.75;
+    return 1;
+  }
+
   /// Convert a dragged cell sequence into placeable pieces with auto-curves.
   TrackPlan planTrack(List<Cell> drag) {
     final cells = <Cell>[];
@@ -390,7 +423,7 @@ class Game extends ChangeNotifier {
     final pieces = <Planned>[];
     var cost = 0;
     var truncated = false;
-    int? level; // grade the rail rides at; bridges carry it over water
+    int? prevExit; // rail height where the previous cell hands over
     for (var i = 0; i < cells.length; i++) {
       final c = cells[i];
       if (!inBounds(c) ||
@@ -399,21 +432,6 @@ class Game extends ChangeNotifier {
           switches.containsKey(c)) {
         break;
       }
-      final wet = isWater(c);
-      int cellLevel;
-      if (wet) {
-        // A bridge deck holds the grade it was entered from; a drag can't
-        // begin over open water unless it starts on an existing bridge.
-        final existing = deck[c] ?? level;
-        if (existing == null) break;
-        cellLevel = existing;
-      } else {
-        if (!heights.isFlat(c)) break;
-        cellLevel = heights.floorOf(c);
-        // Rail stays level until phase 3 brings gradients.
-        if (level != null && cellLevel != level) break;
-      }
-      level = cellLevel;
       Dir? toPrev = i > 0 ? _dirBetween(c, cells[i - 1]) : null;
       Dir? toNext = i < cells.length - 1 ? _dirBetween(c, cells[i + 1]) : null;
       if (i > 0 && toPrev == null) break; // non-adjacent jump: stop
@@ -431,6 +449,32 @@ class Game extends ChangeNotifier {
           kind = (d == Dir.e || d == Dir.w) ? TrackKind.ew : TrackKind.ns;
         }
       }
+
+      // Grade rules: bridges deck flat over water at the grade they were
+      // entered from; curves need flat ground; straights may climb one step
+      // per cell along their axis, never across a side-slope.
+      final wet = isWater(c);
+      final int entryH, exitH;
+      if (wet) {
+        final lvl = deck[c] ?? prevExit;
+        if (lvl == null) break; // can't begin a bridge over open water
+        entryH = exitH = lvl;
+      } else if (kind.isCurve) {
+        if (!heights.isFlat(c)) break;
+        entryH = exitH = heights.floorOf(c);
+      } else {
+        final dirs = kind.conn.toList();
+        final entryDir = toPrev ?? dirs.firstWhere((d) => d != toNext);
+        final exitDir = dirs.firstWhere((d) => d != entryDir);
+        final eIn = _edgeLevel(c, entryDir), eOut = _edgeLevel(c, exitDir);
+        if (eIn == null || eOut == null) break; // side-slope under the rail
+        if ((eIn - eOut).abs() > 1) break; // too steep to climb
+        entryH = eIn;
+        exitH = eOut;
+      }
+      if (prevExit != null && entryH != prevExit) break; // grade mismatch
+      prevExit = exitH;
+
       final existing = board[c];
       if (existing != null) {
         if (existing == kind) {
@@ -446,7 +490,7 @@ class Game extends ChangeNotifier {
       }
       cost += price;
       pieces.add(Planned(c, kind, price,
-          bridge: wet, deckLevel: wet ? cellLevel : null));
+          bridge: wet, deckLevel: wet ? entryH : null));
     }
     return TrackPlan(pieces, cost, truncated);
   }
@@ -624,6 +668,9 @@ class Game extends ChangeNotifier {
     if (first == null) {
       if (switches.containsKey(c)) return 'Already a switch';
       if (!board.containsKey(c)) return 'Tap an existing track piece';
+      if (!heights.isFlat(c) && !deck.containsKey(c)) {
+        return 'Switches need flat ground';
+      }
       if (balance < priceSwitch) return 'Not enough money';
       pendingSwitch = c;
       notifyListeners();
@@ -798,13 +845,15 @@ class Game extends ChangeNotifier {
           s = math.min(s, idx + 0.94); // pull up short of the cow
           break;
         }
+        // Grades stretch or shrink the time a step takes.
+        final f = stepCost(p[idx % len]);
         final toBoundary = idx + 1 - s;
-        if (adv < toBoundary) {
-          s += adv;
+        if (adv < toBoundary * f) {
+          s += adv / f;
           break;
         }
         s += toBoundary;
-        adv -= toBoundary;
+        adv -= toBoundary * f;
         if (s >= len) {
           s = 0;
           final payout = cars * len + lapBonus;
