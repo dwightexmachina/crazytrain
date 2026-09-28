@@ -479,6 +479,72 @@ class Game extends ChangeNotifier {
     return 1;
   }
 
+  /// Edges of [c] with a connector on the far side ready to join new track
+  /// at matching rail height: open track ends, switch legs, a tunnel
+  /// portal's outward mouth, or any side of a launchpad.
+  Set<Dir> connectionOffers(Cell c) {
+    final out = <Dir>{};
+    for (final d in Dir.values) {
+      final n = c.step(d);
+      if (!inBounds(n)) continue;
+      final myEdge = _edgeLevel(c, d);
+      if (myEdge == null) continue; // a side-sloped edge can't host a joint
+      final back = d.opposite;
+      final double theirs;
+      final piece = board[n];
+      final sw = switches[n];
+      final partner = tunnels[n];
+      if (piece != null) {
+        if (!piece.conn.contains(back)) continue;
+        theirs = railEdgeZ(n, back);
+      } else if (sw != null) {
+        if (back != sw.base && back != sw.branchA && back != sw.branchB) {
+          continue;
+        }
+        theirs = railEdgeZ(n, back);
+      } else if (partner != null) {
+        if (back != axisDir(n, partner)!.opposite) continue; // mouth side only
+        theirs = heights.floorOf(n).toDouble();
+      } else if (launchpads.containsKey(n)) {
+        theirs = heights.floorOf(n).toDouble();
+      } else {
+        continue;
+      }
+      if ((theirs - myEdge).abs() > 0.01) continue;
+      out.add(d);
+    }
+    return out;
+  }
+
+  /// Orientation for a drag endpoint ([leg] = its one known direction) or a
+  /// single tap ([leg] null): snap toward adjacent connectors when a valid
+  /// piece results, else fall back to the drag axis (or EW for a tap).
+  TrackKind _endpointKind(Cell c, Dir? leg) {
+    final offers = connectionOffers(c);
+    if (leg != null) {
+      final ahead = leg.opposite; // straight through, continuing the motion
+      if (offers.contains(ahead)) return TrackKind.fromDirs(leg, ahead)!;
+      for (final d in offers) {
+        final k = leg == d ? null : TrackKind.fromDirs(leg, d);
+        if (k != null) return k; // curve into the connector
+      }
+      return (leg == Dir.e || leg == Dir.w) ? TrackKind.ew : TrackKind.ns;
+    }
+    final list = offers.toList();
+    for (var i = 0; i < list.length; i++) {
+      for (var j = i + 1; j < list.length; j++) {
+        final k = TrackKind.fromDirs(list[i], list[j]);
+        if (k != null) return k; // join two connectors in one tap
+      }
+    }
+    if (list.isNotEmpty) {
+      return (list.first == Dir.e || list.first == Dir.w)
+          ? TrackKind.ew
+          : TrackKind.ns;
+    }
+    return TrackKind.ew;
+  }
+
   /// Convert a dragged cell sequence into placeable pieces with auto-curves.
   TrackPlan planTrack(List<Cell> drag) {
     final cells = <Cell>[];
@@ -507,13 +573,8 @@ class Game extends ChangeNotifier {
         if (k == null) break; // pointer doubled back onto itself
         kind = k;
       } else {
-        final d = toPrev ?? toNext;
-        if (d == null) {
-          // Single-cell tap: default EW straight.
-          kind = TrackKind.ew;
-        } else {
-          kind = (d == Dir.e || d == Dir.w) ? TrackKind.ew : TrackKind.ns;
-        }
+        // Endpoints and taps snap toward whatever wants to connect.
+        kind = _endpointKind(c, toPrev ?? toNext);
       }
 
       // Grade rules: bridges deck flat over water at the grade they were

@@ -700,6 +700,27 @@ void main() {
       expect(g.tunnels, isEmpty);
     });
 
+    test('drag endpoints snap into portal mouths and track ends', () {
+      final g = ridgeGame();
+      g.tapTunnel(const Cell(5, 1));
+      g.tapTunnel(const Cell(8, 1));
+      // Approaching the west portal from the north: the endpoint curves
+      // east into its mouth instead of defaulting to a NS straight.
+      final toPortal = g.planTrack(const [Cell(4, 0), Cell(4, 1)]);
+      expect(toPortal.pieces.last.kind, TrackKind.ne);
+      // A lone tap beside the mouth aligns to it.
+      final tap = g.planTrack(const [Cell(4, 1)]);
+      expect(tap.pieces.single.kind, TrackKind.ew);
+      // Plain track connects the same way: build a NS stub, then a drag
+      // ending beside its open end curves into it...
+      g.commitTrack(g.planTrack(const [Cell(11, 0), Cell(11, 1)]));
+      final joint = g.planTrack(const [Cell(9, 2), Cell(10, 2), Cell(11, 2)]);
+      expect(joint.pieces.last.kind, TrackKind.nw);
+      // ...and a tap below the stub aligns NS rather than the EW default.
+      final below = g.planTrack(const [Cell(11, 2)]);
+      expect(below.pieces.single.kind, TrackKind.ns);
+    });
+
     test('portal pairs persist across reload', () {
       final g = ridgeGame();
       g.tapTunnel(const Cell(5, 1));
