@@ -1749,6 +1749,25 @@ void main() {
     });
   });
 
+  group('sound events', () {
+    test('the model queues effects for the audio pump', () {
+      final g = flatGame();
+      g.cows.clear();
+      g.s = g.path!.length - 0.5;
+      g.tick(0.4); // lap completes
+      expect(g.sfx, contains('payout'));
+      g.sfx.clear();
+      g.balance = 1000;
+      expect(g.blast(const Cell(6, 5)), isNull);
+      expect(g.sfx, contains('boom'));
+      // The queue caps rather than backlogging in a throttled tab.
+      for (var i = 0; i < 30; i++) {
+        g.blast(Cell(8 + (i % 8), 10 + i ~/ 8));
+      }
+      expect(g.sfx.length, lessThanOrEqualTo(8));
+    });
+  });
+
   group('route map', () {
     Future<void> toMap(WidgetTester tester) async {
       await tester.pumpWidget(const TrainMakerApp());

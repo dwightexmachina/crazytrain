@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../audio/sfx.dart';
 import '../model/game.dart';
 import 'painters.dart';
 import 'palette.dart';
@@ -57,6 +58,7 @@ class _BoardViewState extends State<BoardView>
       ..start();
     game.tick(dt.clamp(0.0, 60.0));
     _updateFollow();
+    Sfx.pump(game);
   }
 
   /// Follow-cam: glide the pan so the followed engine stays centered.
@@ -157,6 +159,7 @@ class _BoardViewState extends State<BoardView>
   void _pointerDown(Offset local) {
     _pointerActive = true;
     _downPos = local;
+    Sfx.warm(); // browsers only allow audio after a gesture
     if (game.tool == Tool.none) {
       _panning = true;
       _lastPanPos = local;
@@ -437,6 +440,13 @@ class _BoardViewState extends State<BoardView>
                   const SizedBox(height: 6),
                   _camBtn(Icons.rotate_left_rounded, 'Rotate left',
                       () => _rotate(-1)),
+                  const SizedBox(height: 6),
+                  _camBtn(
+                      Sfx.muted
+                          ? Icons.volume_off_rounded
+                          : Icons.volume_up_rounded,
+                      Sfx.muted ? 'Unmute sounds' : 'Mute sounds',
+                      () => setState(Sfx.toggleMuted)),
                   const SizedBox(height: 6),
                   _camBtn(
                       _follow >= 0

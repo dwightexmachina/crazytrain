@@ -211,6 +211,13 @@ class Game extends ChangeNotifier {
 
   final List<Toast> toasts = [];
 
+  /// Queued sound-effect event names, drained each frame by the UI's
+  /// audio pump. Capped so a throttled tab can't build a noise backlog.
+  final List<String> sfx = [];
+  void _fx(String name) {
+    if (sfx.length < 8) sfx.add(name);
+  }
+
   Building get station => buildings.first;
   int get trackLength => path?.length ?? 0;
 
@@ -1422,6 +1429,7 @@ class Game extends ChangeNotifier {
       }
     }
     blastsFired++;
+    _fx('boom');
     structureRev++;
     _collapseBrokenTunnels();
     _rebuildPath();
@@ -2079,6 +2087,7 @@ class Game extends ChangeNotifier {
             _relocateCow(cow, nextCell);
             cowsPlowed++;
             balance += 5;
+            _fx('plow');
             if (toasts.length < 6) {
               toasts.add(
                   Toast(nextCell.x + 0.5, nextCell.y - 0.4, 'MOO +\$5'));
@@ -2132,6 +2141,7 @@ class Game extends ChangeNotifier {
         if (trains.length >= 2 && !trains.any((t) => t.wrecked)) {
           dualLaps++;
         }
+        _fx('payout');
         tr.lapValid = true;
         tr.lapClock = 0;
         tr.lapBonus = 0;
@@ -2144,11 +2154,16 @@ class Game extends ChangeNotifier {
       // s sits exactly on a cell boundary: the train just entered this cell.
       final cell = p[tr.s.floor() % len].cell;
       if (speedPads.contains(cell)) tr.boost = boostSeconds;
-      if (loops.contains(cell)) loopsRidden++;
-      final stepNow = p[tr.s.floor() % len];
-      if (stepNow.flyTo != null && ramps.containsKey(stepNow.cell)) {
-        jumpsMade++;
+      if (loops.contains(cell)) {
+        loopsRidden++;
+        _fx('loop');
       }
+      final stepNow = p[tr.s.floor() % len];
+      if (stepNow.flyTo != null) {
+        _fx('launch');
+        if (ramps.containsKey(stepNow.cell)) jumpsMade++;
+      }
+      if (stepNow.tunnelTo != null) _fx('tunnel');
       for (final b in buildings) {
         if (b.type.bonus > 0 && b.trigger == cell) {
           tr.lapBonus += b.type.bonus;
@@ -2213,6 +2228,7 @@ class Game extends ChangeNotifier {
     a.wrecked = true;
     b.wrecked = true;
     dualLaps = 0; // the crash-free streak is over
+    _fx('crash');
     final at = hit.first;
     toasts.add(Toast(at.x + 0.5, at.y - 0.4, 'CRASH!', big: true));
   }
@@ -2229,6 +2245,7 @@ class Game extends ChangeNotifier {
     if (!hit) return null;
     if (balance < priceRerail) return 'Not enough money';
     balance -= priceRerail;
+    _fx('rerail');
     for (final t in trains) {
       t.wrecked = false;
     }
@@ -2311,6 +2328,7 @@ class Game extends ChangeNotifier {
         !ScenarioProgress.celebrated(sc.id)) {
       ScenarioProgress.markCelebrated(sc.id);
       lineClearPending = true;
+      _fx('clear');
     }
     return won;
   }
