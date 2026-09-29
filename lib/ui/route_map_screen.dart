@@ -113,6 +113,30 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                           color: Pal.muted)),
                 ]),
           ),
+          // Invisible tap targets over the PAINTED station dots and the
+          // roundhouse: people click the drawings on the map, not just the
+          // name plates below them.
+          for (var i = 0; i < Scenarios.all.length; i++)
+            Positioned(
+              left: px(kStationPos[i]) - 32,
+              top: py(kStationPos[i]) - 32,
+              width: 64,
+              height: 64,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _sel = i),
+              ),
+            ),
+          Positioned(
+            left: px(_roundhousePos) - 55,
+            top: py(_roundhousePos) - 62,
+            width: 110,
+            height: 80,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onSandbox,
+            ),
+          ),
           // Station plates. Centered via a wide hit box, NOT a paint-only
           // FractionalTranslation: hit tests outside a widget's own box are
           // dropped, which made half of every plate a dead zone.

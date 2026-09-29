@@ -9,6 +9,7 @@ import 'package:crazytrain/model/scenario.dart';
 import 'package:crazytrain/model/track.dart';
 import 'package:crazytrain/ui/board_view.dart';
 import 'package:crazytrain/ui/painters.dart';
+import 'package:crazytrain/ui/route_map_screen.dart';
 
 Game freshGame() {
   web.window.localStorage.clear();
@@ -1795,6 +1796,27 @@ void main() {
             reason: '${sc.name}: plate tap must open its panel — if this '
                 'fails the plate is buried or its hit box is offset');
       }
+    });
+
+    testWidgets('the painted station dots and roundhouse are tappable',
+        (tester) async {
+      web.window.localStorage.clear();
+      await toMap(tester);
+      final size = tester.getSize(find.byType(RouteMapScreen));
+      // Tap The Gorge's DOT on the line (poster coords 300,498 of
+      // 1060×640) — the drawing itself, not the name plate.
+      await tester.tapAt(Offset(
+          300 / 1060 * size.width, 498 / 640 * size.height));
+      await tester.pump();
+      expect(find.text('THE GORGE'), findsNWidgets(2),
+          reason: 'clicking the painted dot must select the stop');
+      // Tap the roundhouse BUILDING (poster coords ~688,560): boards
+      // the sandbox.
+      await tester.tapAt(Offset(
+          688 / 1060 * size.width, 560 / 640 * size.height));
+      await tester.pump();
+      expect(find.byType(BoardView), findsOneWidget,
+          reason: 'clicking the roundhouse drawing boards the sandbox');
     });
 
     testWidgets('the roundhouse boards the sandbox', (tester) async {
