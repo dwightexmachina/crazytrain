@@ -694,6 +694,16 @@ class DynamicPainter extends CustomPainter {
           game.loops.contains(h) || game.loopSiteError(h) == null
               ? Pal.ghostOk
               : Pal.ghostBad,
+        Tool.jumpRamp when game.pendingRamp == null =>
+          game.ramps.containsKey(h) || game.rampSiteError(h) == null
+              ? Pal.ghostOk
+              : Pal.ghostBad,
+        Tool.jumpRamp => // aiming: neighbors of the armed ramp are valid
+          ((h.x - game.pendingRamp!.x).abs() +
+                      (h.y - game.pendingRamp!.y).abs()) ==
+                  1
+              ? Pal.ghostOk
+              : Pal.ghostBad,
         _ => Pal.hover,
       };
       _face(c, color, cellQuad(h));
@@ -787,7 +797,8 @@ class DynamicPainter extends CustomPainter {
 
     // Armed track piece awaiting its switch base-side tap, or an armed
     // first tunnel portal.
-    for (final ps in [game.pendingSwitch, game.pendingTunnel]) {
+    for (final ps in [game.pendingSwitch, game.pendingTunnel,
+        game.pendingRamp]) {
       if (ps == null) continue;
       _face(c, Pal.ghostOk, cellQuad(ps));
     }
@@ -977,6 +988,32 @@ class DynamicPainter extends CustomPainter {
               ..strokeWidth = 0.028 * v.s
               ..color = Colors.white);
       }));
+    }
+
+    // Jump ramps: a rising wedge aimed along the firing direction.
+    void drawRamp(Cell rc, Dir dir, {bool ghost = false}) {
+      final z = (hf.centerZ(rc)) * kZStep;
+      final (dx, dy) = switch (dir) {
+        Dir.n => (0.0, -1.0),
+        Dir.s => (0.0, 1.0),
+        Dir.e => (1.0, 0.0),
+        Dir.w => (-1.0, 0.0),
+      };
+      final cx = rc.x + 0.5, cy = rc.y + 0.5;
+      items.add((v.depthKey(cx, cy) + 0.01, () {
+        final along = dx.abs() > 0;
+        // Low tail, tall lip: reads as a wedge pointing the flight way.
+        drawBox(c, v, cx - dx * 0.22, cy - dy * 0.22,
+            along ? 0.3 : 0.62, along ? 0.62 : 0.3, 0.1, Pal.stop, z);
+        drawBox(c, v, cx + dx * 0.05, cy + dy * 0.05,
+            along ? 0.3 : 0.62, along ? 0.62 : 0.3, 0.24, Pal.stop, z);
+        drawBox(c, v, cx + dx * 0.3, cy + dy * 0.3,
+            along ? 0.24 : 0.62, along ? 0.62 : 0.24, 0.4, Pal.stopRoof, z);
+      }));
+    }
+
+    for (final e in game.ramps.entries) {
+      drawRamp(e.key, e.value);
     }
 
     // Block signals: a mast with a lamp — red while it's holding a train.

@@ -168,15 +168,33 @@ Dir? axisDir(Cell a, Cell b) {
 List<PathStep>? traceLoop(Map<Cell, TrackKind> board, Cell start, Dir startExit,
     {Map<Cell, Cell> pads = const {},
     Map<Cell, Cell> tunnels = const {},
-    Map<Cell, TrackSwitch> switches = const {}}) {
+    Map<Cell, TrackSwitch> switches = const {},
+    Map<Cell, Dir> ramps = const {}}) {
   final steps = <PathStep>[];
   var cell = start;
   var exit = startExit;
   // With switches a loop may cross a cell more than once; bound by states.
-  final maxHops =
-      4 * (board.length + pads.length + tunnels.length + switches.length) + 4;
+  final maxHops = 4 *
+          (board.length +
+              pads.length +
+              tunnels.length +
+              switches.length +
+              ramps.length) +
+      4;
   for (var i = 0; i <= maxHops; i++) {
     final next = cell.step(exit);
+    final rampDir = ramps[next];
+    if (rampDir != null) {
+      final entry = exit.opposite;
+      // Ramps are one-way: hit from behind or the line is broken.
+      if (exit != rampDir) return null;
+      final land = next.step(rampDir).step(rampDir).step(rampDir);
+      steps.add(PathStep(next, entry, exit)); // up the ramp
+      steps.add(PathStep(next, entry, exit, flyTo: land)); // airborne
+      // Aim the walk so the next iteration arrives on the landing cell.
+      cell = land.step(exit.opposite);
+      continue;
+    }
     final partner = pads[next];
     if (partner != null) {
       final entry = exit.opposite;

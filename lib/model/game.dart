@@ -117,6 +117,7 @@ class Game extends ChangeNotifier {
   static const int priceSpeedPad = 150; // booster strip on straight track
   static const double boostSeconds = 2.0; // burst length per pad crossing
   static const int priceLoop = 450; // vertical loop-de-loop on a straight
+  static const int priceRamp = 250; // one-way jump ramp, flies 3 cells
   static const int priceSecondTrain = 1500; // opposite-direction engine
   static const int priceRerail = 250; // crane fee after a crash
   static const double tilesPerSecond = 2.2;
@@ -149,6 +150,12 @@ class Game extends ChangeNotifier {
   final Set<Cell> loops = {}; // vertical loop-de-loops on straight track
   int loopsRidden = 0; // engine passes through any loop (persisted)
   bool loopStalled = false; // a train is waiting at a loop, needs speed
+
+  /// Jump ramps: ramp cell -> firing direction. One-way; the train flies
+  /// three cells and must land on aligned track.
+  final Map<Cell, Dir> ramps = {};
+  Cell? pendingRamp; // armed ramp awaiting its aim tap
+  int jumpsMade = 0; // engine launches off any ramp (persisted)
 
   /// Sim-seconds of the best full lap any train has run (null until a
   /// complete from-payout-to-payout lap exists). Sim time = dt × speed,
@@ -218,7 +225,10 @@ class Game extends ChangeNotifier {
   /// Cows wander only on dry, walkable land — no water, no launchpads,
   /// nothing steeper than a single step across the cell.
   bool _cowTerrain(Cell c) {
-    if (isWater(c) || launchpads.containsKey(c) || tunnels.containsKey(c)) {
+    if (isWater(c) ||
+        launchpads.containsKey(c) ||
+        tunnels.containsKey(c) ||
+        ramps.containsKey(c)) {
       return false;
     }
     final (a, b, d, e) = heights.corners(c);
@@ -237,6 +247,7 @@ class Game extends ChangeNotifier {
     pendingPad = null; // switching tools abandons half-placed pieces
     pendingSwitch = null;
     pendingTunnel = null;
+    pendingRamp = null;
     levelTarget = null;
     placingTrain = false;
     _spawnPath = null;
@@ -273,6 +284,9 @@ class Game extends ChangeNotifier {
     speedPads.clear();
     loops.clear();
     loopsRidden = 0;
+    ramps.clear();
+    pendingRamp = null;
+    jumpsMade = 0;
     bestLapTime = null;
     final sc = scenario;
     if (sc != null && sc.build != null) {
@@ -305,6 +319,7 @@ class Game extends ChangeNotifier {
       board.containsKey(c) ||
       launchpads.containsKey(c) ||
       tunnels.containsKey(c) ||
+      ramps.containsKey(c) ||
       buildings.any((b) =>
           (b.cell.x - c.x).abs() <= 1 && (b.cell.y - c.y).abs() <= 1);
 
@@ -492,9 +507,9 @@ class Game extends ChangeNotifier {
             ? [kind.conn.last, kind.conn.first]
             : [kind.conn.first, kind.conn.last];
         p = traceLoop(board, trigger, dirs[0],
-                pads: launchpads, tunnels: tunnels, switches: switches) ??
+                pads: launchpads, tunnels: tunnels, switches: switches, ramps: ramps) ??
             traceLoop(board, trigger, dirs[1],
-                pads: launchpads, tunnels: tunnels, switches: switches);
+                pads: launchpads, tunnels: tunnels, switches: switches, ramps: ramps);
       }
       // Keep the train where it stands when the route re-forms around it.
       final old = tr.path;
@@ -596,6 +611,11 @@ class Game extends ChangeNotifier {
       if (back != axisDir(n, partner)!.opposite) return null; // mouth side
       return heights.floorOf(n).toDouble();
     }
+    final rampDir = ramps[n];
+    if (rampDir != null) {
+      if (back != rampDir.opposite) return null; // only its tail connects
+      return heights.floorOf(n).toDouble();
+    }
     if (launchpads.containsKey(n)) return heights.floorOf(n).toDouble();
     return null;
   }
@@ -676,6 +696,7 @@ class Game extends ChangeNotifier {
           _cellBlocked(c) ||
           launchpads.containsKey(c) ||
           tunnels.containsKey(c) ||
+          ramps.containsKey(c) ||
           switches.containsKey(c)) {
         break;
       }
@@ -763,6 +784,7 @@ class Game extends ChangeNotifier {
         _cellBlocked(c) ||
         launchpads.containsKey(c) ||
         tunnels.containsKey(c) ||
+        ramps.containsKey(c) ||
         switches.containsKey(c);
     if (occupied(from) || occupied(to)) return null;
     if (from == to) return [from];
@@ -950,6 +972,7 @@ class Game extends ChangeNotifier {
         _cellBlocked(c) ||
         launchpads.containsKey(c) ||
         tunnels.containsKey(c) ||
+        ramps.containsKey(c) ||
         switches.containsKey(c)) {
       return 'Cell occupied';
     }
@@ -1052,9 +1075,9 @@ class Game extends ChangeNotifier {
     if (trigger != null && board.containsKey(trigger)) {
       final kind = board[trigger]!;
       p = traceLoop(board, trigger, kind.conn.last,
-              pads: launchpads, tunnels: tunnels, switches: switches) ??
+              pads: launchpads, tunnels: tunnels, switches: switches, ramps: ramps) ??
           traceLoop(board, trigger, kind.conn.first,
-              pads: launchpads, tunnels: tunnels, switches: switches);
+              pads: launchpads, tunnels: tunnels, switches: switches, ramps: ramps);
     }
     if (p == null) return 'Close the loop first';
     _spawnPath = p;
@@ -1172,8 +1195,64 @@ class Game extends ChangeNotifier {
     return null;
   }
 
+  /// Why [c] can't host a jump ramp, or null when it can.
+  String? rampSiteError(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (ramps.containsKey(c)) return 'Already a ramp';
+    if (board.containsKey(c) || switches.containsKey(c)) {
+      return 'Remove the track first';
+    }
+    if (_cellBlocked(c) ||
+        tunnels.containsKey(c) ||
+        launchpads.containsKey(c)) {
+      return 'Cell occupied';
+    }
+    if (isWater(c)) return "Can't jump from water";
+    if (!heights.isFlat(c)) return 'Needs flat ground';
+    return null;
+  }
+
+  /// Two-tap placement: first tap arms the ramp, second tap on a neighbor
+  /// aims it (the train flies three cells that way). Tapping the armed
+  /// ramp cancels; tapping an existing ramp removes it (half refund).
+  String? tapRamp(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    final first = pendingRamp;
+    if (first == c) {
+      pendingRamp = null;
+      notifyListeners();
+      return null;
+    }
+    if (ramps.containsKey(c)) {
+      ramps.remove(c);
+      balance += priceRamp ~/ 2;
+      _rebuildPath();
+      _save();
+      notifyListeners();
+      return null;
+    }
+    if (first == null) {
+      final site = rampSiteError(c);
+      if (site != null) return site;
+      if (balance < priceRamp) return 'Not enough money';
+      pendingRamp = c;
+      notifyListeners();
+      return null;
+    }
+    final d = _dirBetween(first, c);
+    if (d == null) return 'Tap a cell beside the ramp to aim it';
+    final land = first.step(d).step(d).step(d);
+    if (!inBounds(land)) return 'The jump would leave the map';
+    balance -= priceRamp;
+    ramps[first] = d;
+    pendingRamp = null;
+    _rebuildPath();
+    _save();
+    notifyListeners();
+    return null;
+  }
+
   // Wired to the toolbar ahead of their implementation lanes.
-  String? tapRamp(Cell c) => 'Coming soon';
   String? tapTurntable(Cell c) => 'Coming soon';
   String? blast(Cell c) => 'Coming soon';
 
@@ -1368,7 +1447,9 @@ class Game extends ChangeNotifier {
     if (board.containsKey(c) || switches.containsKey(c)) {
       return 'Remove the track first';
     }
-    if (_cellBlocked(c) || tunnels.containsKey(c)) return 'Cell occupied';
+    if (_cellBlocked(c) || tunnels.containsKey(c) || ramps.containsKey(c)) {
+      return 'Cell occupied';
+    }
     if (isWater(c)) return "Can't float on water";
     if (!heights.isFlat(c)) return 'Needs flat ground';
     return null;
@@ -1426,7 +1507,9 @@ class Game extends ChangeNotifier {
     if (board.containsKey(c) || switches.containsKey(c)) {
       return 'Remove the track first';
     }
-    if (_cellBlocked(c) || launchpads.containsKey(c)) return 'Cell occupied';
+    if (_cellBlocked(c) || launchpads.containsKey(c) || ramps.containsKey(c)) {
+      return 'Cell occupied';
+    }
     if (isWater(c)) return "Can't bore from water";
     if (!heights.isFlat(c)) return 'Portals need flat ground';
     return null;
@@ -1589,6 +1672,15 @@ class Game extends ChangeNotifier {
         notifyListeners();
         return;
       }
+    }
+    final rampDir2 = ramps[c];
+    if (rampDir2 != null) {
+      ramps.remove(c);
+      balance += priceRamp ~/ 2;
+      _rebuildPath();
+      _save();
+      notifyListeners();
+      return;
     }
     final portal = tunnels[c];
     if (portal != null) {
@@ -1820,6 +1912,10 @@ class Game extends ChangeNotifier {
       final cell = p[tr.s.floor() % len].cell;
       if (speedPads.contains(cell)) tr.boost = boostSeconds;
       if (loops.contains(cell)) loopsRidden++;
+      final stepNow = p[tr.s.floor() % len];
+      if (stepNow.flyTo != null && ramps.containsKey(stepNow.cell)) {
+        jumpsMade++;
+      }
       for (final b in buildings) {
         if (b.type.bonus > 0 && b.trigger == cell) {
           tr.lapBonus += b.type.bonus;
@@ -1998,6 +2094,8 @@ class Game extends ChangeNotifier {
       'speedPads': [for (final c in speedPads) c.toString()],
       'loops': [for (final c in loops) c.toString()],
       'loopsRidden': loopsRidden,
+      'ramps': [for (final e in ramps.entries) '${e.key}|${e.value.index}'],
+      'jumps': jumpsMade,
       'bestLapTime': bestLapTime,
       'trains': [
         for (final t in trains) {'cars': t.cars, 'rev': t.reversed},
@@ -2164,6 +2262,12 @@ class Game extends ChangeNotifier {
         loops.add(Cell.parse(c as String));
       }
       loopsRidden = data['loopsRidden'] as int? ?? 0;
+      ramps.clear();
+      for (final r in (data['ramps'] as List? ?? [])) {
+        final parts = (r as String).split('|');
+        ramps[Cell.parse(parts[0])] = Dir.values[int.parse(parts[1])];
+      }
+      jumpsMade = data['jumps'] as int? ?? 0;
       bestLapTime = (data['bestLapTime'] as num?)?.toDouble();
       trains
         ..clear()

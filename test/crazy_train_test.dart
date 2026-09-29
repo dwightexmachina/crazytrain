@@ -1378,6 +1378,76 @@ void main() {
     });
   });
 
+  group('jump ramp', () {
+    test('arm-and-aim placement, cancel, and removal', () {
+      final g = flatGame();
+      g.balance = 2000;
+      expect(g.tapRamp(const Cell(5, 1)), isNull); // arm
+      expect(g.pendingRamp, const Cell(5, 1));
+      expect(g.tapRamp(const Cell(5, 1)), isNull); // tap again = cancel
+      expect(g.pendingRamp, isNull);
+      g.tapRamp(const Cell(5, 1));
+      expect(g.tapRamp(const Cell(9, 9)), isNotNull); // aim must be adjacent
+      expect(g.tapRamp(const Cell(6, 1)), isNull); // aim east
+      expect(g.ramps[const Cell(5, 1)], Dir.e);
+      expect(g.balance, 2000 - Game.priceRamp);
+      expect(g.tapRamp(const Cell(5, 1)), isNull); // tap existing = remove
+      expect(g.ramps, isEmpty);
+      expect(g.balance, 2000 - Game.priceRamp + Game.priceRamp ~/ 2);
+    });
+
+    test('a ramp flies the loop three cells onto aligned track', () {
+      final g = flatGame();
+      g.balance = 100000;
+      // Break the loop's top edge and bridge the hole with a jump:
+      // track runs 3..4, ramp at (5,3), flight over (6,3),(7,3), landing
+      // on existing track at (8,3).
+      g.bulldoze(const Cell(5, 3));
+      g.bulldoze(const Cell(6, 3));
+      g.bulldoze(const Cell(7, 3));
+      g.tapRamp(const Cell(5, 3));
+      g.tapRamp(const Cell(6, 3)); // aim east
+      expect(g.path, isNotNull, reason: 'flight re-closes the loop');
+      final flight =
+          g.path!.where((st) => st.flyTo != null).toList();
+      expect(flight, hasLength(1));
+      expect(flight.single.cell, const Cell(5, 3));
+      expect(flight.single.flyTo, const Cell(8, 3));
+      // Riding it counts a jump.
+      final before = g.jumpsMade;
+      for (var i = 0; i < 40 && g.jumpsMade == before; i++) {
+        g.tick(0.5);
+      }
+      expect(g.jumpsMade, greaterThan(before));
+    });
+
+    test('ramps are one-way: a backwards trace breaks the line', () {
+      final g = flatGame();
+      g.balance = 100000;
+      g.bulldoze(const Cell(5, 3));
+      g.bulldoze(const Cell(6, 3));
+      g.bulldoze(const Cell(7, 3));
+      g.tapRamp(const Cell(7, 3));
+      g.tapRamp(const Cell(6, 3)); // aims WEST — against loop direction…
+      // …which serves one direction and breaks the other: the loop still
+      // traces for whichever heading hits the ramp from behind.
+      final fwd = traceLoop(g.board, g.station.trigger!,
+          g.board[g.station.trigger!]!.conn.first,
+          pads: g.launchpads,
+          tunnels: g.tunnels,
+          switches: g.switches,
+          ramps: g.ramps);
+      final rev = traceLoop(g.board, g.station.trigger!,
+          g.board[g.station.trigger!]!.conn.last,
+          pads: g.launchpads,
+          tunnels: g.tunnels,
+          switches: g.switches,
+          ramps: g.ramps);
+      expect((fwd == null) != (rev == null), isTrue,
+          reason: 'exactly one direction survives a one-way ramp');
+    });
+  });
+
   group('route map', () {
     Future<void> toMap(WidgetTester tester) async {
       await tester.pumpWidget(const TrainMakerApp());

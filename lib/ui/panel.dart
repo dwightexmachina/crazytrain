@@ -215,6 +215,16 @@ class _ShopPanelState extends State<ShopPanel> {
               'A vertical 360° on flat straight track. Trains need momentum: without an active speed boost they stall short of the hoop. Tap a loop to remove it.',
         ),
         _toolItem(
+          tool: Tool.jumpRamp,
+          icon: Icons.trending_up_rounded,
+          title: 'Jump ramp',
+          tag: '\$${Game.priceRamp}',
+          chip: '\$${Game.priceRamp}',
+          enabled: game.balance >= Game.priceRamp,
+          desc:
+              'One-way launcher: tap a clear cell, then a neighbor to aim. The train flies three cells and must land on aligned track — over water, chasms, even other lines. Tap a ramp to remove it.',
+        ),
+        _toolItem(
           tool: Tool.stop,
           icon: Icons.home_work_rounded,
           title: BuildingType.stop.label,
@@ -669,7 +679,9 @@ class _ShopPanelState extends State<ShopPanel> {
         'Tap straight track to lay a booster strip: crossing it gives the train a burst of double speed. Chain pads for a longer surge — loops need the momentum. Tap a pad to remove it (half refund).',
       Tool.loopDeLoop =>
         'Tap flat straight track to raise a loop-de-loop. A train only makes it around with an active speed boost — lay a speed pad a cell or two before the hoop (or under a stalled train to send it through).',
-      Tool.jumpRamp || Tool.turntable || Tool.dynamite => 'Coming soon.',
+      Tool.jumpRamp =>
+        'Tap a clear flat cell to arm the ramp, then tap a neighboring cell to aim it. Run track into the ramp\'s tail: the train launches three cells forward and needs aligned track waiting at the landing spot. Ramps are one-way — a reversed train can\'t use them.',
+      Tool.turntable || Tool.dynamite => 'Coming soon.',
       Tool.none =>
         'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };
