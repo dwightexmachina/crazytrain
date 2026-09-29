@@ -128,7 +128,7 @@ class _ShopPanelState extends State<ShopPanel> {
           title: 'Select',
           tag: 'SELECT',
           desc:
-              'Flip switches by tapping them · drag to pan, scroll to zoom. Esc returns here.',
+              'Tap a switch to flip it, tap an engine to reverse its train · drag to pan, scroll to zoom. Esc returns here.',
         ),
         _toolItem(
           tool: Tool.track,
@@ -749,7 +749,7 @@ class _ShopPanelState extends State<ShopPanel> {
       Tool.dynamite =>
         'Tap the ground to blow a 2×2 crater below the water line — water floods straight in. Vertices pinned under track, buildings and other structures don\'t budge. \$${Game.priceDynamite} a blast.',
       Tool.none =>
-        'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
+        'Select mode: tap a switch to flip it, tap an engine to reverse its train, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };
     return Container(
       padding: const EdgeInsets.all(11),

@@ -275,9 +275,15 @@ class _BoardViewState extends State<BoardView>
           if (cell != null) {
             if (game.placingTrain) {
               _maybeNotice(game.placeSecondTrain(cell));
-            } else {
-              game.toggleSwitch(cell);
+            } else if (game.trains.any((t) => t.wrecked)) {
               _maybeNotice(game.tapWreck(cell));
+            } else {
+              final engine = game.trainEngineAt(cell);
+              if (engine != null) {
+                _maybeNotice(game.reverseTrain(engine));
+              } else {
+                game.toggleSwitch(cell);
+              }
             }
           }
         }

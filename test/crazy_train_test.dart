@@ -1619,6 +1619,48 @@ void main() {
     });
   });
 
+  group('reverse train', () {
+    test('flipping keeps the engine in place and the loop closed', () {
+      final g = flatGame();
+      g.s = 5.3;
+      final tr = g.trains.first;
+      final cellBefore = g.engineCell;
+      expect(tr.reversed, isFalse);
+      expect(g.reverseTrain(tr), isNull);
+      expect(tr.reversed, isTrue);
+      expect(g.path, isNotNull);
+      expect(g.engineCell, cellBefore, reason: 'no teleporting');
+      final frac = tr.s - tr.s.floorToDouble();
+      expect(frac, closeTo(0.7, 0.05), reason: 'mirrored within the cell');
+      // Flip back works too.
+      expect(g.reverseTrain(tr), isNull);
+      expect(tr.reversed, isFalse);
+    });
+
+    test('one-way ramp routes refuse the flip', () {
+      final g = flatGame();
+      g.balance = 100000;
+      g.bulldoze(const Cell(5, 3));
+      g.bulldoze(const Cell(6, 3));
+      g.bulldoze(const Cell(7, 3));
+      g.tapRamp(const Cell(5, 3));
+      g.tapRamp(const Cell(6, 3)); // one-way east jump closes the loop
+      expect(g.path, isNotNull);
+      final tr = g.trains.first;
+      final wasReversed = tr.reversed;
+      expect(g.reverseTrain(tr), isNotNull, reason: 'flip must refuse');
+      expect(tr.reversed, wasReversed);
+      expect(g.path, isNotNull, reason: 'the working direction survives');
+    });
+
+    test('wrecked trains must be re-railed before reversing', () {
+      final g = flatGame();
+      g.trains.first.wrecked = true;
+      expect(g.reverseTrain(g.trains.first), isNotNull);
+      expect(g.trains.first.reversed, isFalse);
+    });
+  });
+
   group('route map', () {
     Future<void> toMap(WidgetTester tester) async {
       await tester.pumpWidget(const TrainMakerApp());

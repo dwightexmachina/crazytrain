@@ -44,7 +44,7 @@ class Cow {
 class Train {
   double s = 0; // position along [path], in steps
   int cars;
-  final bool reversed;
+  bool reversed; // travel direction; flip any time via Game.reverseTrain
   bool wrecked = false;
   int lapBonus = 0;
   double boost = 0; // seconds of double speed left (speed pads; transient)
@@ -2107,6 +2107,48 @@ class Game extends ChangeNotifier {
       }
     }
     if (paidOut) _save();
+  }
+
+  /// Select-mode tap on an engine: flip that train's travel direction.
+  /// One-way routes (jump ramps) refuse the flip rather than stranding
+  /// the train; the engine keeps its place on the line otherwise.
+  String? reverseTrain(Train tr) {
+    if (tr.wrecked) return 'Re-rail it first';
+    final oldPath = tr.renderPath;
+    final at = oldPath == null || oldPath.isEmpty
+        ? null
+        : oldPath[tr.s.floor() % oldPath.length].cell;
+    final frac = tr.s - tr.s.floorToDouble();
+    final hadPath = tr.path != null;
+    final beforeFirst = hadPath ? tr.path!.first : null;
+    tr.reversed = !tr.reversed;
+    _rebuildPath();
+    // A one-way route (jump ramps) survives via the trace fallback with
+    // the SAME direction — detect "nothing changed" as well as "broken".
+    final afterFirst = tr.path?.isNotEmpty == true ? tr.path!.first : null;
+    final unchanged = beforeFirst != null &&
+        afterFirst != null &&
+        afterFirst.cell == beforeFirst.cell &&
+        afterFirst.entry == beforeFirst.entry &&
+        afterFirst.exit == beforeFirst.exit;
+    if (hadPath && (tr.path == null || unchanged)) {
+      tr.reversed = !tr.reversed; // stay as we were
+      _rebuildPath();
+      return "Can't reverse here — the route only runs one way";
+    }
+    // Keep the engine on its cell, mirrored within it (30% through
+    // eastbound becomes 70% through westbound).
+    final p = tr.path;
+    if (p != null && at != null) {
+      final ni = p.indexWhere((st) => st.cell == at);
+      if (ni >= 0) tr.s = ni + (1 - frac).clamp(0.0, 0.99);
+    }
+    if (at != null && toasts.length < 6) {
+      toasts.add(Toast(at.x + 0.5, at.y - 0.4, 'Reversed'));
+    }
+    _save();
+    notifyListeners();
+    return null;
   }
 
   void _detectCrash() {
