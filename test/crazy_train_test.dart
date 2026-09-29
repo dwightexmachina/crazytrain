@@ -1334,6 +1334,50 @@ void main() {
     });
   });
 
+  group('loop-de-loop', () {
+    test('placement wants flat straight dry track; toggles off', () {
+      final g = flatGame();
+      g.balance = 2000;
+      expect(g.tapLoop(const Cell(5, 3)), isNull);
+      expect(g.loops, contains(const Cell(5, 3)));
+      expect(g.tapLoop(const Cell(3, 3)), isNotNull); // curve
+      expect(g.tapLoop(const Cell(5, 5)), isNotNull); // no track
+      sink(g, const Cell(9, 1));
+      expect(g.tapLoop(const Cell(9, 1)), isNotNull); // water
+      expect(g.tapLoop(const Cell(5, 3)), isNull); // remove
+      expect(g.loops, isEmpty);
+      expect(g.balance, 2000 - Game.priceLoop + Game.priceLoop ~/ 2);
+    });
+
+    test('trains stall without boost, ride through with one', () {
+      final g = flatGame();
+      g.balance = 2000;
+      final loopIdx = List.generate(g.path!.length, (i) => i).firstWhere(
+          (i) =>
+              i >= 3 &&
+              g.board[g.path![i].cell] != null &&
+              !g.board[g.path![i].cell]!.isCurve);
+      final loopCell = g.path![loopIdx].cell;
+      expect(g.tapLoop(loopCell), isNull);
+      g.s = loopIdx - 1.5; // rolling toward the hoop
+      for (var i = 0; i < 6; i++) {
+        g.tick(0.4);
+      }
+      expect(g.loopStalled, isTrue);
+      expect(g.s, lessThan(loopIdx.toDouble()), reason: 'held short of it');
+      expect(g.loopsRidden, 0);
+      // A speed pad under the waiting train sends it through.
+      final waitCell = g.path![g.s.floor()].cell;
+      expect(g.tapSpeedPad(waitCell), isNull);
+      for (var i = 0; i < 6; i++) {
+        g.tick(0.4);
+      }
+      expect(g.s, greaterThan(loopIdx + 1.0));
+      expect(g.loopsRidden, 1);
+      expect(g.loopStalled, isFalse);
+    });
+  });
+
   group('route map', () {
     Future<void> toMap(WidgetTester tester) async {
       await tester.pumpWidget(const TrainMakerApp());

@@ -116,6 +116,7 @@ class Game extends ChangeNotifier {
   static const int priceSignal = 150; // block signal on a track cell
   static const int priceSpeedPad = 150; // booster strip on straight track
   static const double boostSeconds = 2.0; // burst length per pad crossing
+  static const int priceLoop = 450; // vertical loop-de-loop on a straight
   static const int priceSecondTrain = 1500; // opposite-direction engine
   static const int priceRerail = 250; // crane fee after a crash
   static const double tilesPerSecond = 2.2;
@@ -145,6 +146,9 @@ class Game extends ChangeNotifier {
   final Set<Cell> signals = {};
   final Set<Cell> heldSignals = {}; // signals actively holding a train
   final Set<Cell> speedPads = {}; // booster strips on straight track
+  final Set<Cell> loops = {}; // vertical loop-de-loops on straight track
+  int loopsRidden = 0; // engine passes through any loop (persisted)
+  bool loopStalled = false; // a train is waiting at a loop, needs speed
 
   /// Sim-seconds of the best full lap any train has run (null until a
   /// complete from-payout-to-payout lap exists). Sim time = dt × speed,
@@ -267,6 +271,8 @@ class Game extends ChangeNotifier {
     signals.clear();
     heldSignals.clear();
     speedPads.clear();
+    loops.clear();
+    loopsRidden = 0;
     bestLapTime = null;
     final sc = scenario;
     if (sc != null && sc.build != null) {
@@ -1129,8 +1135,44 @@ class Game extends ChangeNotifier {
     return null;
   }
 
+  /// Why [c] can't host a loop-de-loop, or null when it can (also drives
+  /// the hover tint). Loops sit on flat, dry, straight track.
+  String? loopSiteError(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    final k = board[c];
+    if (k == null || k.isCurve) return 'Loops sit on straight track';
+    if (deck.containsKey(c) || isWater(c)) return 'Not over water';
+    if (!heights.isFlat(c)) return 'Needs flat ground';
+    if (speedPads.contains(c)) {
+      return 'Not on a speed pad — put the run-up before the loop';
+    }
+    return null;
+  }
+
+  /// Place a loop-de-loop on flat straight track, or tap one to remove it
+  /// (half refund). Trains need an active speed boost to make it around —
+  /// without one they stall short of the hoop.
+  String? tapLoop(Cell c) {
+    if (loops.contains(c)) {
+      loops.remove(c);
+      balance += priceLoop ~/ 2;
+      structureRev++;
+      _save();
+      notifyListeners();
+      return null;
+    }
+    final site = loopSiteError(c);
+    if (site != null) return site;
+    if (balance < priceLoop) return 'Not enough money';
+    balance -= priceLoop;
+    loops.add(c);
+    structureRev++;
+    _save();
+    notifyListeners();
+    return null;
+  }
+
   // Wired to the toolbar ahead of their implementation lanes.
-  String? tapLoop(Cell c) => 'Coming soon';
   String? tapRamp(Cell c) => 'Coming soon';
   String? tapTurntable(Cell c) => 'Coming soon';
   String? blast(Cell c) => 'Coming soon';
@@ -1592,6 +1634,7 @@ class Game extends ChangeNotifier {
       deck.remove(c);
       signals.remove(c);
       if (speedPads.remove(c)) balance += priceSpeedPad ~/ 2;
+      if (loops.remove(c)) balance += priceLoop ~/ 2;
       balance += _piecePrice(piece, c) ~/ 2;
       _rebuildPath();
       _save();
@@ -1729,6 +1772,17 @@ class Game extends ChangeNotifier {
         tr.s = math.min(tr.s, idx + 0.94); // pull up short of the cow
         break;
       }
+      if (loops.contains(nextCell) && tr.boost <= 0) {
+        // No momentum: the train stalls short of the hoop. A speed pad
+        // under the waiting train re-arms it on the spot.
+        if (speedPads.contains(p[idx % len].cell)) {
+          tr.boost = boostSeconds;
+        } else {
+          loopStalled = true;
+          tr.s = math.min(tr.s, idx + 0.94);
+          break;
+        }
+      }
       if (signals.contains(nextCell) && _blockOccupied(tr, nextIdx)) {
         heldSignals.add(nextCell);
         tr.s = math.min(tr.s, idx + 0.94); // held at the red
@@ -1765,6 +1819,7 @@ class Game extends ChangeNotifier {
       // s sits exactly on a cell boundary: the train just entered this cell.
       final cell = p[tr.s.floor() % len].cell;
       if (speedPads.contains(cell)) tr.boost = boostSeconds;
+      if (loops.contains(cell)) loopsRidden++;
       for (final b in buildings) {
         if (b.type.bonus > 0 && b.trigger == cell) {
           tr.lapBonus += b.type.bonus;
@@ -1832,6 +1887,7 @@ class Game extends ChangeNotifier {
       dirty = true;
     }
     cowBlocked = false;
+    loopStalled = false;
     heldSignals.clear();
     if (speed > 0) {
       // With two trains, a large catch-up tick could step them through each
@@ -1940,6 +1996,8 @@ class Game extends ChangeNotifier {
       ],
       'signals': [for (final c in signals) c.toString()],
       'speedPads': [for (final c in speedPads) c.toString()],
+      'loops': [for (final c in loops) c.toString()],
+      'loopsRidden': loopsRidden,
       'bestLapTime': bestLapTime,
       'trains': [
         for (final t in trains) {'cars': t.cars, 'rev': t.reversed},
@@ -2101,6 +2159,11 @@ class Game extends ChangeNotifier {
       for (final c in (data['speedPads'] as List? ?? [])) {
         speedPads.add(Cell.parse(c as String));
       }
+      loops.clear();
+      for (final c in (data['loops'] as List? ?? [])) {
+        loops.add(Cell.parse(c as String));
+      }
+      loopsRidden = data['loopsRidden'] as int? ?? 0;
       bestLapTime = (data['bestLapTime'] as num?)?.toDouble();
       trains
         ..clear()

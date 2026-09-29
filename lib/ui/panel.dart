@@ -205,6 +205,16 @@ class _ShopPanelState extends State<ShopPanel> {
               'A booster strip on straight track: crossing it doubles the train\'s speed for a couple of seconds. Loops need one for a run-up. Tap a pad to remove it.',
         ),
         _toolItem(
+          tool: Tool.loopDeLoop,
+          icon: Icons.all_inclusive_rounded,
+          title: 'Loop-de-loop',
+          tag: '\$${Game.priceLoop}',
+          chip: '\$${Game.priceLoop}',
+          enabled: game.balance >= Game.priceLoop,
+          desc:
+              'A vertical 360° on flat straight track. Trains need momentum: without an active speed boost they stall short of the hoop. Tap a loop to remove it.',
+        ),
+        _toolItem(
           tool: Tool.stop,
           icon: Icons.home_work_rounded,
           title: BuildingType.stop.label,
@@ -450,6 +460,11 @@ class _ShopPanelState extends State<ShopPanel> {
           true
         ),
       _ when broken => ('Track broken — train halted', Pal.bad, true),
+      _ when game.loopStalled => (
+          'Stalled at the loop — needs a speed-pad run-up',
+          Pal.warn,
+          true
+        ),
       _ when game.cowBlocked => ('MOO — cow on the line!', Pal.warn, true),
       _ when game.speed == 0 => ('Paused', Pal.muted, false),
       _ => ('Running', Pal.good, true),
@@ -652,8 +667,9 @@ class _ShopPanelState extends State<ShopPanel> {
         'Tap track to place a signal; tap a signal to remove it. Trains hold at a red while the block ahead — up to the next signal — is occupied. Build a passing loop with two switches, signal both ends, and opposite trains will take turns. If they crash, tap the wreck to pay the crane (\$${Game.priceRerail}).',
       Tool.speedPad =>
         'Tap straight track to lay a booster strip: crossing it gives the train a burst of double speed. Chain pads for a longer surge — loops need the momentum. Tap a pad to remove it (half refund).',
-      Tool.loopDeLoop || Tool.jumpRamp || Tool.turntable || Tool.dynamite =>
-        'Coming soon.',
+      Tool.loopDeLoop =>
+        'Tap flat straight track to raise a loop-de-loop. A train only makes it around with an active speed boost — lay a speed pad a cell or two before the hoop (or under a stalled train to send it through).',
+      Tool.jumpRamp || Tool.turntable || Tool.dynamite => 'Coming soon.',
       Tool.none =>
         'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };

@@ -690,6 +690,10 @@ class DynamicPainter extends CustomPainter {
                 (game.board[h] != null && !game.board[h]!.isCurve)
             ? Pal.ghostOk
             : Pal.ghostBad,
+        Tool.loopDeLoop =>
+          game.loops.contains(h) || game.loopSiteError(h) == null
+              ? Pal.ghostOk
+              : Pal.ghostBad,
         _ => Pal.hover,
       };
       _face(c, color, cellQuad(h));
@@ -882,7 +886,13 @@ class DynamicPainter extends CustomPainter {
           final zb = game.railEdgeZ(st.cell, st.exit);
           groundZ = (za + (zb - za) * t) * kZStep;
         }
-        final z = groundZ + st.flightZ(t);
+        var z = groundZ + st.flightZ(t);
+        // Riding a loop-de-loop: climb around the inside of the hoop.
+        if (game.loops.contains(st.cell) &&
+            st.flyTo == null &&
+            st.tunnelTo == null) {
+          z += 0.42 * (1 - math.cos(2 * math.pi * t));
+        }
         final horiz = math.cos(heading).abs() > math.sin(heading).abs();
         final w = horiz ? 0.68 : 0.34, d = horiz ? 0.34 : 0.68;
         actors.add((px, py));
@@ -934,6 +944,39 @@ class DynamicPainter extends CustomPainter {
           ..close();
         c.drawPath(path, paint);
       }
+    }
+
+    // Loop-de-loops: a vertical hoop rising off the rail bed, drawn in the
+    // travel plane so trains climb around its inside.
+    for (final lc in game.loops) {
+      final kind = game.board[lc];
+      if (kind == null) continue;
+      final ew = kind.conn.contains(Dir.e) || kind.conn.contains(Dir.w);
+      final zBase = hf.centerZ(lc) * kZStep;
+      final cx = lc.x + 0.5, cy = lc.y + 0.5;
+      items.add((v.depthKey(cx, cy) + 0.02, () {
+        final ring = Path();
+        for (var i = 0; i <= 28; i++) {
+          final th = i / 28 * 2 * math.pi;
+          final a = 0.40 * math.sin(th);
+          final p = v.pt(cx + (ew ? a : 0), cy + (ew ? 0 : a),
+              zBase + 0.45 * (1 - math.cos(th)));
+          i == 0 ? ring.moveTo(p.dx, p.dy) : ring.lineTo(p.dx, p.dy);
+        }
+        c.drawPath(
+            ring,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeCap = StrokeCap.round
+              ..strokeWidth = 0.1 * v.s
+              ..color = Pal.bed);
+        c.drawPath(
+            ring,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 0.028 * v.s
+              ..color = Colors.white);
+      }));
     }
 
     // Block signals: a mast with a lamp — red while it's holding a train.
