@@ -20,13 +20,15 @@ class RouteMapScreen extends StatefulWidget {
 
 /// Normalized station positions on the 1060×640 poster canvas, in line
 /// order (matching [Scenarios.all]).
+// The detail panel occupies the upper-right corner of the screen, so no
+// station may live there — it would sit underneath the panel, untappable.
 const List<Offset> kStationPos = [
   Offset(105, 585),
   Offset(300, 498),
   Offset(545, 430),
   Offset(720, 330),
   Offset(600, 235),
-  Offset(930, 148),
+  Offset(690, 92),
 ];
 const Offset _roundhousePos = Offset(688, 584);
 const Size _posterSize = Size(1060, 640);
@@ -638,11 +640,11 @@ class _RouteMapPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.5
       ..color = _ink;
-    for (final (x, w2, h2) in [(820.0, 14.0, 22.0), (850.0, 11.0, 17.0), (878.0, 13.0, 20.0)]) {
+    for (final (x, w2, h2) in [(560.0, 14.0, 22.0), (590.0, 11.0, 17.0), (618.0, 13.0, 20.0)]) {
       final p = Path()
-        ..moveTo(x, 172)
-        ..lineTo(x + w2, 172 - h2)
-        ..lineTo(x + w2 * 2, 172)
+        ..moveTo(x, 128)
+        ..lineTo(x + w2, 128 - h2)
+        ..lineTo(x + w2 * 2, 128)
         ..close();
       c.drawPath(p, nub);
       c.drawPath(p, nubStroke);
@@ -658,10 +660,9 @@ class _RouteMapPainter extends CustomPainter {
     (Offset(380, 476), Offset(470, 452), Offset(545, 430)),
     (Offset(620, 408), Offset(690, 380), Offset(720, 330)),
     (Offset(750, 280), Offset(660, 260), Offset(600, 235)),
-    (Offset(540, 210), Offset(700, 175), Offset(790, 165)),
-    (Offset(880, 155), Offset(890, 152), Offset(930, 148)),
+    (Offset(540, 210), Offset(640, 140), Offset(690, 92)),
   ];
-  static const _segmentsTo = [0, 1, 2, 3, 4, 6];
+  static const _segmentsTo = [0, 1, 2, 3, 4, 5];
 
   Path _routePath({int? toStation}) {
     final count = toStation == null ? _segs.length : _segmentsTo[toStation];

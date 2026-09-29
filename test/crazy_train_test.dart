@@ -1780,6 +1780,20 @@ void main() {
       expect(find.text('LINE CLEAR!'), findsNothing);
     });
 
+    testWidgets('every stop can be selected by tapping its plate',
+        (tester) async {
+      web.window.localStorage.clear();
+      await toMap(tester);
+      for (final sc in Scenarios.all) {
+        // Plates come before the panel in the tree: .first is the plate.
+        await tester.tap(find.text(sc.name).first);
+        await tester.pump();
+        expect(find.text(sc.name), findsAtLeastNWidgets(2),
+            reason: '${sc.name}: plate tap must open its panel — if this '
+                'fails the plate is buried under the detail panel');
+      }
+    });
+
     testWidgets('the roundhouse boards the sandbox', (tester) async {
       await enterSandbox(tester);
       final game = tester.widget<BoardView>(find.byType(BoardView)).game;
