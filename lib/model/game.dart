@@ -2334,6 +2334,22 @@ class Game extends ChangeNotifier {
   static bool hasSaveFor(String? scenarioId) =>
       web.window.localStorage.getItem(keyFor(scenarioId)) != null;
 
+  /// Peek the record stats out of a saved world without loading it:
+  /// (best lap sim-seconds, best single-lap payout). Null when no save.
+  static (double?, int)? savedStats(String? scenarioId) {
+    final raw = web.window.localStorage.getItem(keyFor(scenarioId));
+    if (raw == null) return null;
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      return (
+        (data['bestLapTime'] as num?)?.toDouble(),
+        data['bestLap'] as int? ?? 0,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Persist immediately — used when leaving for the route map.
   void saveNow() => _save();
 

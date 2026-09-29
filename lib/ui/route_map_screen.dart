@@ -424,6 +424,22 @@ class _DetailPanel extends StatelessWidget {
               ),
           ]),
         ],
+        if (playable && hasSave) ...[
+          const SizedBox(height: 6),
+          if (Game.savedStats(scenario.id) case (final t, final haul)
+              when t != null || haul > 0)
+            Text(
+              [
+                if (t != null) 'Best lap ${t.toStringAsFixed(1)}s',
+                if (haul > 0) 'best haul \$$haul',
+              ].join(' · '),
+              style: const TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                  color: Pal.faint),
+            ),
+        ],
         if (playable) ...[
           const SizedBox(height: 9),
           Row(children: [

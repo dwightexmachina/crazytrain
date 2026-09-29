@@ -1852,6 +1852,21 @@ void main() {
       }
     });
 
+    testWidgets('clicks pass through the fading splash', (tester) async {
+      web.window.localStorage.clear();
+      await tester.pumpWidget(const TrainMakerApp());
+      await tester.pump();
+      await tester.tap(find.text('TAP TO ROLL'));
+      await tester.pump(const Duration(milliseconds: 60)); // fade started
+      // Mid-fade, a click must fall through to the route map beneath.
+      await tester.tap(find.text('THE GORGE').first, warnIfMissed: false);
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      expect(find.text('THE GORGE'), findsNWidgets(2),
+          reason: 'the fading poster must not eat map clicks');
+    });
+
     testWidgets('the painted station dots and roundhouse are tappable',
         (tester) async {
       web.window.localStorage.clear();

@@ -27,6 +27,7 @@ class _BoardViewState extends State<BoardView>
   Cell? _routeTarget; // last routed hover cell, to skip repeat work
   final ValueNotifier<TrackPlan?> _plan = ValueNotifier(null);
   final BoardPictureCache _boardCache = BoardPictureCache();
+  int _follow = -1; // train index the camera follows; -1 = free camera
   final ValueNotifier<Cell?> _hover = ValueNotifier(null);
 
   // Camera: whole-board fit at zoom 1, scroll/pinch to zoom, drag (no tool)
@@ -55,6 +56,29 @@ class _BoardViewState extends State<BoardView>
       ..reset()
       ..start();
     game.tick(dt.clamp(0.0, 60.0));
+    _updateFollow();
+  }
+
+  /// Follow-cam: glide the pan so the followed engine stays centered.
+  void _updateFollow() {
+    if (_follow < 0) return;
+    if (_follow >= game.trains.length) {
+      setState(() => _follow = -1);
+      return;
+    }
+    final tr = game.trains[_follow];
+    final p = tr.renderPath;
+    final size = context.size;
+    if (p == null || p.isEmpty || size == null) return;
+    final v = _view(size);
+    final st = p[tr.s.floor() % p.length];
+    final local = st.posInCell(tr.s - tr.s.floorToDouble(), 1.0);
+    final target = v.gpt(st.cell.x + local.dx, st.cell.y + local.dy);
+    final center = Offset(size.width / 2, size.height / 2);
+    final delta = center - target;
+    if (delta.distance > 0.5) {
+      _pan.value = _clampPan(_pan.value + delta * 0.12);
+    }
   }
 
   @override
@@ -136,6 +160,7 @@ class _BoardViewState extends State<BoardView>
     if (game.tool == Tool.none) {
       _panning = true;
       _lastPanPos = local;
+      if (_follow >= 0) setState(() => _follow = -1); // manual pan wins
       return;
     }
     if (game.tool == Tool.raiseLand || game.tool == Tool.lowerLand) {
@@ -412,6 +437,18 @@ class _BoardViewState extends State<BoardView>
                   const SizedBox(height: 6),
                   _camBtn(Icons.rotate_left_rounded, 'Rotate left',
                       () => _rotate(-1)),
+                  const SizedBox(height: 6),
+                  _camBtn(
+                      _follow >= 0
+                          ? Icons.my_location_rounded
+                          : Icons.location_searching_rounded,
+                      _follow >= 0
+                          ? 'Following train ${_follow + 1} — tap to cycle'
+                          : 'Follow a train',
+                      () => setState(() {
+                            _follow =
+                                _follow + 1 >= game.trains.length ? -1 : _follow + 1;
+                          })),
                   const SizedBox(height: 6),
                   _camBtn(Icons.rotate_right_rounded, 'Rotate right',
                       () => _rotate(1)),
