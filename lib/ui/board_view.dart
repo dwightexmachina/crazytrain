@@ -169,6 +169,16 @@ class _BoardViewState extends State<BoardView>
         _maybeNotice(game.tapTunnel(c));
       case Tool.signal:
         _maybeNotice(game.tapSignal(c));
+      case Tool.speedPad:
+        _maybeNotice(game.tapSpeedPad(c));
+      case Tool.loopDeLoop:
+        _maybeNotice(game.tapLoop(c));
+      case Tool.jumpRamp:
+        _maybeNotice(game.tapRamp(c));
+      case Tool.turntable:
+        _maybeNotice(game.tapTurntable(c));
+      case Tool.dynamite:
+        _maybeNotice(game.blast(c));
       case Tool.stop ||
             Tool.depot ||
             Tool.raiseLand ||
@@ -210,6 +220,11 @@ class _BoardViewState extends State<BoardView>
             Tool.switchTrack ||
             Tool.tunnel ||
             Tool.signal ||
+            Tool.speedPad ||
+            Tool.loopDeLoop ||
+            Tool.jumpRamp ||
+            Tool.turntable ||
+            Tool.dynamite ||
             Tool.none:
         break;
     }
@@ -273,7 +288,12 @@ class _BoardViewState extends State<BoardView>
             Tool.launchpad ||
             Tool.switchTrack ||
             Tool.tunnel ||
-            Tool.signal:
+            Tool.signal ||
+            Tool.speedPad ||
+            Tool.loopDeLoop ||
+            Tool.jumpRamp ||
+            Tool.turntable ||
+            Tool.dynamite:
         break;
     }
     _downPos = null;

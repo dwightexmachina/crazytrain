@@ -195,6 +195,16 @@ class _ShopPanelState extends State<ShopPanel> {
               'Tap track to plant a block signal: a train waits there while the stretch ahead (to the next signal) is occupied. Tap a signal to remove it.',
         ),
         _toolItem(
+          tool: Tool.speedPad,
+          icon: Icons.bolt_rounded,
+          title: 'Speed pad',
+          tag: '\$${Game.priceSpeedPad}',
+          chip: '\$${Game.priceSpeedPad}',
+          enabled: game.balance >= Game.priceSpeedPad,
+          desc:
+              'A booster strip on straight track: crossing it doubles the train\'s speed for a couple of seconds. Loops need one for a run-up. Tap a pad to remove it.',
+        ),
+        _toolItem(
           tool: Tool.stop,
           icon: Icons.home_work_rounded,
           title: BuildingType.stop.label,
@@ -640,6 +650,10 @@ class _ShopPanelState extends State<ShopPanel> {
         'Tap two flat cells in a straight line, at the same height, with the mountain between them. Run track up to each portal — the train dives through. Mind your sculpting: strip the cover and the bore collapses.',
       Tool.signal =>
         'Tap track to place a signal; tap a signal to remove it. Trains hold at a red while the block ahead — up to the next signal — is occupied. Build a passing loop with two switches, signal both ends, and opposite trains will take turns. If they crash, tap the wreck to pay the crane (\$${Game.priceRerail}).',
+      Tool.speedPad =>
+        'Tap straight track to lay a booster strip: crossing it gives the train a burst of double speed. Chain pads for a longer surge — loops need the momentum. Tap a pad to remove it (half refund).',
+      Tool.loopDeLoop || Tool.jumpRamp || Tool.turntable || Tool.dynamite =>
+        'Coming soon.',
       Tool.none =>
         'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };

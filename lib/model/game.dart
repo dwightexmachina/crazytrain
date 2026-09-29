@@ -47,6 +47,9 @@ class Train {
   final bool reversed;
   bool wrecked = false;
   int lapBonus = 0;
+  double boost = 0; // seconds of double speed left (speed pads; transient)
+  double lapClock = 0; // sim-seconds since the last payout (transient)
+  bool lapValid = false; // first partial lap after spawn never records
   List<PathStep>? path; // null = no closed route in this direction
   List<PathStep>? lastPath; // keeps a halted train visible
   Train({required this.cars, required this.reversed});
@@ -66,6 +69,11 @@ enum Tool {
   switchTrack,
   tunnel,
   signal,
+  speedPad,
+  loopDeLoop,
+  jumpRamp,
+  turntable,
+  dynamite,
 }
 
 class Toast {
@@ -106,6 +114,8 @@ class Game extends ChangeNotifier {
   static const int priceSwitch = 500; // converts a track piece to a turnout
   static const int priceTunnel = 400; // per bored portal pair
   static const int priceSignal = 150; // block signal on a track cell
+  static const int priceSpeedPad = 150; // booster strip on straight track
+  static const double boostSeconds = 2.0; // burst length per pad crossing
   static const int priceSecondTrain = 1500; // opposite-direction engine
   static const int priceRerail = 250; // crane fee after a crash
   static const double tilesPerSecond = 2.2;
@@ -134,6 +144,12 @@ class Game extends ChangeNotifier {
   final List<Train> trains = [Train(cars: 1, reversed: false)];
   final Set<Cell> signals = {};
   final Set<Cell> heldSignals = {}; // signals actively holding a train
+  final Set<Cell> speedPads = {}; // booster strips on straight track
+
+  /// Sim-seconds of the best full lap any train has run (null until a
+  /// complete from-payout-to-payout lap exists). Sim time = dt × speed,
+  /// so fast-forward can't cheat it.
+  double? bestLapTime;
   int cols = startCols, rows = startRows;
   int deeds = 0; // land deeds bought; each one raises the next deed's price
   int balance = 80;
@@ -250,6 +266,8 @@ class Game extends ChangeNotifier {
       ..add(Train(cars: 1, reversed: false));
     signals.clear();
     heldSignals.clear();
+    speedPads.clear();
+    bestLapTime = null;
     final sc = scenario;
     if (sc != null && sc.build != null) {
       sc.build!(this); // the scenario lays out its whole world
@@ -1087,6 +1105,36 @@ class Game extends ChangeNotifier {
     return null;
   }
 
+  /// Place a speed pad on a straight track cell, or tap an existing one
+  /// to remove it (half refund). Crossing a pad gives the train a
+  /// two-second burst of double speed.
+  String? tapSpeedPad(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (speedPads.contains(c)) {
+      speedPads.remove(c);
+      balance += priceSpeedPad ~/ 2;
+      structureRev++;
+      _save();
+      notifyListeners();
+      return null;
+    }
+    final k = board[c];
+    if (k == null || k.isCurve) return 'Speed pads sit on straight track';
+    if (balance < priceSpeedPad) return 'Not enough money';
+    balance -= priceSpeedPad;
+    speedPads.add(c);
+    structureRev++;
+    _save();
+    notifyListeners();
+    return null;
+  }
+
+  // Wired to the toolbar ahead of their implementation lanes.
+  String? tapLoop(Cell c) => 'Coming soon';
+  String? tapRamp(Cell c) => 'Coming soon';
+  String? tapTurntable(Cell c) => 'Coming soon';
+  String? blast(Cell c) => 'Coming soon';
+
   // ------------------------------------------------------------ terraform (elevation)
 
   /// A vertex is locked when a structure occupies one of its incident cells:
@@ -1543,6 +1591,7 @@ class Game extends ChangeNotifier {
       board.remove(c);
       deck.remove(c);
       signals.remove(c);
+      if (speedPads.remove(c)) balance += priceSpeedPad ~/ 2;
       balance += _piecePrice(piece, c) ~/ 2;
       _rebuildPath();
       _save();
@@ -1660,9 +1709,16 @@ class Game extends ChangeNotifier {
     final p = tr.path;
     if (p == null || tr.wrecked) return;
     final len = p.length;
+    tr.lapClock += dt * speed; // sim-time, so 2× playback records honestly
     // Advance cell by cell so bonuses and payouts fire even when a single
     // tick covers several cells (throttled/background tabs catch up).
     var adv = dt * tilesPerSecond * speed;
+    if (tr.boost > 0) {
+      // A boosted train covers double ground while the burst lasts.
+      final burst = math.min(tr.boost, dt) * speed;
+      adv += burst * tilesPerSecond;
+      tr.boost = math.max(0, tr.boost - dt);
+    }
     var paidOut = false;
     while (adv > 0) {
       final idx = tr.s.floor();
@@ -1692,6 +1748,13 @@ class Game extends ChangeNotifier {
         final payout = tr.cars * len + tr.lapBonus;
         balance += payout;
         if (payout > bestLapPayout) bestLapPayout = payout;
+        // Record the lap time — but never the partial first lap.
+        if (tr.lapValid &&
+            (bestLapTime == null || tr.lapClock < bestLapTime!)) {
+          bestLapTime = tr.lapClock;
+        }
+        tr.lapValid = true;
+        tr.lapClock = 0;
         tr.lapBonus = 0;
         paidOut = true;
         final st = station.cell;
@@ -1701,6 +1764,7 @@ class Game extends ChangeNotifier {
       }
       // s sits exactly on a cell boundary: the train just entered this cell.
       final cell = p[tr.s.floor() % len].cell;
+      if (speedPads.contains(cell)) tr.boost = boostSeconds;
       for (final b in buildings) {
         if (b.type.bonus > 0 && b.trigger == cell) {
           tr.lapBonus += b.type.bonus;
@@ -1875,6 +1939,8 @@ class Game extends ChangeNotifier {
           },
       ],
       'signals': [for (final c in signals) c.toString()],
+      'speedPads': [for (final c in speedPads) c.toString()],
+      'bestLapTime': bestLapTime,
       'trains': [
         for (final t in trains) {'cars': t.cars, 'rev': t.reversed},
       ],
@@ -2031,6 +2097,11 @@ class Game extends ChangeNotifier {
       for (final c in (data['signals'] as List? ?? [])) {
         signals.add(Cell.parse(c as String));
       }
+      speedPads.clear();
+      for (final c in (data['speedPads'] as List? ?? [])) {
+        speedPads.add(Cell.parse(c as String));
+      }
+      bestLapTime = (data['bestLapTime'] as num?)?.toDouble();
       trains
         ..clear()
         ..addAll([

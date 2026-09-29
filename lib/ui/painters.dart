@@ -686,6 +686,10 @@ class DynamicPainter extends CustomPainter {
           game.padSiteError(h) == null ? Pal.ghostOk : Pal.ghostBad,
         Tool.tunnel when game.pendingTunnel == null =>
           game.portalSiteError(h) == null ? Pal.ghostOk : Pal.ghostBad,
+        Tool.speedPad => game.speedPads.contains(h) ||
+                (game.board[h] != null && !game.board[h]!.isCurve)
+            ? Pal.ghostOk
+            : Pal.ghostBad,
         _ => Pal.hover,
       };
       _face(c, color, cellQuad(h));
@@ -908,6 +912,27 @@ class DynamicPainter extends CustomPainter {
             drawBox(c, v, px, py, w * 0.94, d * 0.94, 0.26, carCols, 0.04 + z);
           }
         }));
+      }
+    }
+
+    // Speed pads: paired chevrons flat on the rail bed along the track axis.
+    for (final pc in game.speedPads) {
+      final kind = game.board[pc];
+      if (kind == null) continue;
+      final z = (game.deck[pc]?.toDouble() ?? hf.centerZ(pc)) * kZStep + 0.02;
+      final ew = kind.conn.contains(Dir.e) || kind.conn.contains(Dir.w);
+      final paint = Paint()..color = const Color(0xCC5BA8D9);
+      for (final t in [0.32, 0.58]) {
+        final (cx, cy) = (pc.x + (ew ? t : 0.5), pc.y + (ew ? 0.5 : t));
+        Offset at(double a, double b) => v.pt(
+            cx + (ew ? a : b), cy + (ew ? b : a), z);
+        final path = Path()
+          ..moveTo(at(-0.06, -0.16).dx, at(-0.06, -0.16).dy)
+          ..lineTo(at(0.12, 0).dx, at(0.12, 0).dy)
+          ..lineTo(at(-0.06, 0.16).dx, at(-0.06, 0.16).dy)
+          ..lineTo(at(0.02, 0).dx, at(0.02, 0).dy)
+          ..close();
+        c.drawPath(path, paint);
       }
     }
 

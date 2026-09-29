@@ -1283,6 +1283,57 @@ void main() {
     });
   });
 
+  group('speed pads & lap timer', () {
+    test('pads place on straights only and toggle off with refund', () {
+      final g = flatGame();
+      g.balance = 1000;
+      expect(g.tapSpeedPad(const Cell(5, 3)), isNull); // top edge straight
+      expect(g.speedPads, contains(const Cell(5, 3)));
+      expect(g.balance, 850);
+      expect(g.tapSpeedPad(const Cell(3, 3)), isNotNull); // corner curve
+      expect(g.tapSpeedPad(const Cell(5, 5)), isNotNull); // empty ground
+      expect(g.tapSpeedPad(const Cell(5, 3)), isNull); // toggle off
+      expect(g.balance, 850 + Game.priceSpeedPad ~/ 2);
+      expect(g.speedPads, isEmpty);
+    });
+
+    test('crossing a pad doubles ground covered while the burst lasts', () {
+      final g = flatGame();
+      g.balance = 1000;
+      final padCell = g.path![2].cell;
+      g.tapSpeedPad(padCell);
+      // Walk the train up to just before the pad, then measure one second.
+      g.s = 1.2;
+      g.tick(0.5); // crosses into the pad cell, boost arms
+      expect(g.trains.first.boost, greaterThan(0));
+      final before = g.s;
+      g.tick(0.5);
+      final boosted = g.s - before;
+      expect(boosted, greaterThan(0.5 * Game.tilesPerSecond * 1.5),
+          reason: 'burst should cover well over normal distance');
+    });
+
+    test('lap timer records from the second full lap on', () {
+      final g = flatGame();
+      final lapLen = g.path!.length; // 28 steps at 2.2/s ≈ 12.7 sim-s
+      // First lap is partial by definition: no record.
+      for (var i = 0; i < 40 && !g.trains.first.lapValid; i++) {
+        g.tick(0.5);
+      }
+      expect(g.trains.first.lapValid, isTrue);
+      expect(g.bestLapTime, isNull, reason: 'first lap never records');
+      final clock0 = g.trains.first.lapClock;
+      for (var i = 0; i < 80 && g.bestLapTime == null; i++) {
+        g.tick(0.5);
+      }
+      expect(g.bestLapTime, isNotNull);
+      expect(g.bestLapTime!, greaterThan(lapLen / Game.tilesPerSecond - 2));
+      expect(g.bestLapTime!, lessThan(lapLen / Game.tilesPerSecond + 4));
+      expect(clock0, lessThan(g.bestLapTime!),
+          reason: 'clock was mid-lap when validity latched');
+    });
+  });
+
   group('route map', () {
     Future<void> toMap(WidgetTester tester) async {
       await tester.pumpWidget(const TrainMakerApp());
