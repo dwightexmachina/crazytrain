@@ -704,6 +704,10 @@ class DynamicPainter extends CustomPainter {
                   1
               ? Pal.ghostOk
               : Pal.ghostBad,
+        Tool.turntable =>
+          game.turntables.contains(h) || game.turntableSiteError(h) == null
+              ? Pal.ghostOk
+              : Pal.ghostBad,
         _ => Pal.hover,
       };
       _face(c, color, cellQuad(h));
@@ -1014,6 +1018,40 @@ class DynamicPainter extends CustomPainter {
 
     for (final e in game.ramps.entries) {
       drawRamp(e.key, e.value);
+    }
+
+    // Turntables: a round pit with a bridge bar across it.
+    for (final tc in game.turntables) {
+      final z = hf.centerZ(tc) * kZStep;
+      final cx = tc.x + 0.5, cy = tc.y + 0.5;
+      items.add((v.depthKey(cx, cy) - 0.05, () {
+        final ctr = v.pt(cx, cy, z + 0.03);
+        final rect = Rect.fromCenter(
+            center: ctr,
+            width: 2 * Iso.kx * 0.44 * v.s,
+            height: 2 * Iso.ky * 0.44 * v.s);
+        c.drawOval(rect, Paint()..color = Pal.bed);
+        c.drawOval(
+            rect,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 0.03 * v.s
+              ..color = Colors.white);
+        // The bridge bar sits along the axis of whichever track adjoins.
+        final ewSide = game.board[Cell(tc.x - 1, tc.y)] != null ||
+            game.board[Cell(tc.x + 1, tc.y)] != null;
+        final a = v.pt(cx - (ewSide ? 0.38 : 0), cy - (ewSide ? 0 : 0.38),
+            z + 0.04);
+        final b = v.pt(cx + (ewSide ? 0.38 : 0), cy + (ewSide ? 0 : 0.38),
+            z + 0.04);
+        c.drawLine(
+            a,
+            b,
+            Paint()
+              ..strokeCap = StrokeCap.round
+              ..strokeWidth = 0.14 * v.s
+              ..color = Pal.plank);
+      }));
     }
 
     // Block signals: a mast with a lamp — red while it's holding a train.

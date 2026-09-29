@@ -118,6 +118,7 @@ class Game extends ChangeNotifier {
   static const double boostSeconds = 2.0; // burst length per pad crossing
   static const int priceLoop = 450; // vertical loop-de-loop on a straight
   static const int priceRamp = 250; // one-way jump ramp, flies 3 cells
+  static const int priceTurntable = 500; // reverses trains: out-and-back
   static const int priceSecondTrain = 1500; // opposite-direction engine
   static const int priceRerail = 250; // crane fee after a crash
   static const double tilesPerSecond = 2.2;
@@ -156,6 +157,7 @@ class Game extends ChangeNotifier {
   final Map<Cell, Dir> ramps = {};
   Cell? pendingRamp; // armed ramp awaiting its aim tap
   int jumpsMade = 0; // engine launches off any ramp (persisted)
+  final Set<Cell> turntables = {}; // reversal platforms at line ends
 
   /// Sim-seconds of the best full lap any train has run (null until a
   /// complete from-payout-to-payout lap exists). Sim time = dt × speed,
@@ -228,7 +230,8 @@ class Game extends ChangeNotifier {
     if (isWater(c) ||
         launchpads.containsKey(c) ||
         tunnels.containsKey(c) ||
-        ramps.containsKey(c)) {
+        ramps.containsKey(c) ||
+        turntables.contains(c)) {
       return false;
     }
     final (a, b, d, e) = heights.corners(c);
@@ -287,6 +290,7 @@ class Game extends ChangeNotifier {
     ramps.clear();
     pendingRamp = null;
     jumpsMade = 0;
+    turntables.clear();
     bestLapTime = null;
     final sc = scenario;
     if (sc != null && sc.build != null) {
@@ -320,6 +324,7 @@ class Game extends ChangeNotifier {
       launchpads.containsKey(c) ||
       tunnels.containsKey(c) ||
       ramps.containsKey(c) ||
+      turntables.contains(c) ||
       buildings.any((b) =>
           (b.cell.x - c.x).abs() <= 1 && (b.cell.y - c.y).abs() <= 1);
 
@@ -507,9 +512,17 @@ class Game extends ChangeNotifier {
             ? [kind.conn.last, kind.conn.first]
             : [kind.conn.first, kind.conn.last];
         p = traceLoop(board, trigger, dirs[0],
-                pads: launchpads, tunnels: tunnels, switches: switches, ramps: ramps) ??
+                pads: launchpads,
+                tunnels: tunnels,
+                switches: switches,
+                ramps: ramps,
+                turntables: turntables) ??
             traceLoop(board, trigger, dirs[1],
-                pads: launchpads, tunnels: tunnels, switches: switches, ramps: ramps);
+                pads: launchpads,
+                tunnels: tunnels,
+                switches: switches,
+                ramps: ramps,
+                turntables: turntables);
       }
       // Keep the train where it stands when the route re-forms around it.
       final old = tr.path;
@@ -616,7 +629,9 @@ class Game extends ChangeNotifier {
       if (back != rampDir.opposite) return null; // only its tail connects
       return heights.floorOf(n).toDouble();
     }
-    if (launchpads.containsKey(n)) return heights.floorOf(n).toDouble();
+    if (launchpads.containsKey(n) || turntables.contains(n)) {
+      return heights.floorOf(n).toDouble();
+    }
     return null;
   }
 
@@ -697,6 +712,7 @@ class Game extends ChangeNotifier {
           launchpads.containsKey(c) ||
           tunnels.containsKey(c) ||
           ramps.containsKey(c) ||
+          turntables.contains(c) ||
           switches.containsKey(c)) {
         break;
       }
@@ -785,6 +801,7 @@ class Game extends ChangeNotifier {
         launchpads.containsKey(c) ||
         tunnels.containsKey(c) ||
         ramps.containsKey(c) ||
+        turntables.contains(c) ||
         switches.containsKey(c);
     if (occupied(from) || occupied(to)) return null;
     if (from == to) return [from];
@@ -973,6 +990,7 @@ class Game extends ChangeNotifier {
         launchpads.containsKey(c) ||
         tunnels.containsKey(c) ||
         ramps.containsKey(c) ||
+        turntables.contains(c) ||
         switches.containsKey(c)) {
       return 'Cell occupied';
     }
@@ -1075,9 +1093,17 @@ class Game extends ChangeNotifier {
     if (trigger != null && board.containsKey(trigger)) {
       final kind = board[trigger]!;
       p = traceLoop(board, trigger, kind.conn.last,
-              pads: launchpads, tunnels: tunnels, switches: switches, ramps: ramps) ??
+              pads: launchpads,
+                tunnels: tunnels,
+                switches: switches,
+                ramps: ramps,
+                turntables: turntables) ??
           traceLoop(board, trigger, kind.conn.first,
-              pads: launchpads, tunnels: tunnels, switches: switches, ramps: ramps);
+              pads: launchpads,
+                tunnels: tunnels,
+                switches: switches,
+                ramps: ramps,
+                turntables: turntables);
     }
     if (p == null) return 'Close the loop first';
     _spawnPath = p;
@@ -1204,7 +1230,8 @@ class Game extends ChangeNotifier {
     }
     if (_cellBlocked(c) ||
         tunnels.containsKey(c) ||
-        launchpads.containsKey(c)) {
+        launchpads.containsKey(c) ||
+        turntables.contains(c)) {
       return 'Cell occupied';
     }
     if (isWater(c)) return "Can't jump from water";
@@ -1252,8 +1279,49 @@ class Game extends ChangeNotifier {
     return null;
   }
 
-  // Wired to the toolbar ahead of their implementation lanes.
-  String? tapTurntable(Cell c) => 'Coming soon';
+  /// Why [c] can't host a turntable, or null when it can.
+  String? turntableSiteError(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (turntables.contains(c)) return 'Already a turntable';
+    if (board.containsKey(c) || switches.containsKey(c)) {
+      return 'Remove the track first';
+    }
+    if (_cellBlocked(c) ||
+        tunnels.containsKey(c) ||
+        launchpads.containsKey(c) ||
+        ramps.containsKey(c)) {
+      return 'Cell occupied';
+    }
+    if (isWater(c)) return "Can't float on water";
+    if (!heights.isFlat(c)) return 'Needs flat ground';
+    return null;
+  }
+
+  /// Place a turntable at a line's end: trains roll on, spin, and head
+  /// back out — the legal way to run a route that isn't a closed loop.
+  /// Tap an existing one to remove it (half refund).
+  String? tapTurntable(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (turntables.contains(c)) {
+      turntables.remove(c);
+      balance += priceTurntable ~/ 2;
+      _rebuildPath();
+      _save();
+      notifyListeners();
+      return null;
+    }
+    final site = turntableSiteError(c);
+    if (site != null) return site;
+    if (balance < priceTurntable) return 'Not enough money';
+    balance -= priceTurntable;
+    turntables.add(c);
+    _rebuildPath();
+    _save();
+    notifyListeners();
+    return null;
+  }
+
+  // Wired to the toolbar ahead of its implementation lane.
   String? blast(Cell c) => 'Coming soon';
 
   // ------------------------------------------------------------ terraform (elevation)
@@ -1447,7 +1515,10 @@ class Game extends ChangeNotifier {
     if (board.containsKey(c) || switches.containsKey(c)) {
       return 'Remove the track first';
     }
-    if (_cellBlocked(c) || tunnels.containsKey(c) || ramps.containsKey(c)) {
+    if (_cellBlocked(c) ||
+        tunnels.containsKey(c) ||
+        ramps.containsKey(c) ||
+        turntables.contains(c)) {
       return 'Cell occupied';
     }
     if (isWater(c)) return "Can't float on water";
@@ -1507,7 +1578,10 @@ class Game extends ChangeNotifier {
     if (board.containsKey(c) || switches.containsKey(c)) {
       return 'Remove the track first';
     }
-    if (_cellBlocked(c) || launchpads.containsKey(c) || ramps.containsKey(c)) {
+    if (_cellBlocked(c) ||
+        launchpads.containsKey(c) ||
+        ramps.containsKey(c) ||
+        turntables.contains(c)) {
       return 'Cell occupied';
     }
     if (isWater(c)) return "Can't bore from water";
@@ -1672,6 +1746,14 @@ class Game extends ChangeNotifier {
         notifyListeners();
         return;
       }
+    }
+    if (turntables.contains(c)) {
+      turntables.remove(c);
+      balance += priceTurntable ~/ 2;
+      _rebuildPath();
+      _save();
+      notifyListeners();
+      return;
     }
     final rampDir2 = ramps[c];
     if (rampDir2 != null) {
@@ -2096,6 +2178,7 @@ class Game extends ChangeNotifier {
       'loopsRidden': loopsRidden,
       'ramps': [for (final e in ramps.entries) '${e.key}|${e.value.index}'],
       'jumps': jumpsMade,
+      'turntables': [for (final c in turntables) c.toString()],
       'bestLapTime': bestLapTime,
       'trains': [
         for (final t in trains) {'cars': t.cars, 'rev': t.reversed},
@@ -2268,6 +2351,10 @@ class Game extends ChangeNotifier {
         ramps[Cell.parse(parts[0])] = Dir.values[int.parse(parts[1])];
       }
       jumpsMade = data['jumps'] as int? ?? 0;
+      turntables.clear();
+      for (final c in (data['turntables'] as List? ?? [])) {
+        turntables.add(Cell.parse(c as String));
+      }
       bestLapTime = (data['bestLapTime'] as num?)?.toDouble();
       trains
         ..clear()

@@ -540,7 +540,9 @@ void main() {
       expect(g.cols, Game.startCols + Game.expandStep);
       expect(g.board[Cell(trackCell.x + 4, trackCell.y)], kind);
       expect(g.station.cell, Cell(station0.x + 4, station0.y));
-      expect(g.heights.vAt(7 + 4, 1), 1); // sculpted vertex moved along
+      // The sculpted vertex moved along (fresh frontier terrain may pile
+      // its own cascade on top, so at-least rather than exactly).
+      expect(g.heights.vAt(7 + 4, 1), greaterThanOrEqualTo(1));
       expect(g.path, isNotNull); // the loop survived the move
       expect(g.buyLand(Dir.n), isTrue);
       expect(g.station.cell, Cell(station0.x + 4, station0.y + 4));
@@ -1445,6 +1447,49 @@ void main() {
           ramps: g.ramps);
       expect((fwd == null) != (rev == null), isTrue,
           reason: 'exactly one direction survives a one-way ramp');
+    });
+  });
+
+  group('turntable', () {
+    test('two turntables run an out-and-back line that pays', () {
+      final g = flatGame();
+      g.balance = 100000;
+      // Strip the loop down to its bottom edge (the station's segment)…
+      for (var x = 3; x <= 12; x++) {
+        g.bulldoze(Cell(x, 3));
+      }
+      for (var y = 4; y <= 8; y++) {
+        g.bulldoze(Cell(3, y));
+        g.bulldoze(Cell(12, y));
+      }
+      expect(g.path, isNull, reason: 'a bare stub has no route');
+      // …and cap both ends.
+      expect(g.tapTurntable(const Cell(3, 8)), isNull);
+      expect(g.tapTurntable(const Cell(12, 8)), isNull);
+      expect(g.path, isNotNull, reason: 'capped ends close the palindrome');
+      final bounces = g.path!.where((st) => st.entry == st.exit).toList();
+      expect(bounces, hasLength(2), reason: 'one spin at each end');
+      // Round trips pay like laps.
+      final before = g.balance;
+      for (var i = 0; i < 80 && g.balance == before; i++) {
+        g.tick(0.5);
+      }
+      expect(g.balance, greaterThan(before));
+      // Removing a table breaks the route again.
+      expect(g.tapTurntable(const Cell(3, 8)), isNull);
+      expect(g.path, isNull);
+    });
+
+    test('placement respects sites and refuses occupied ground', () {
+      final g = flatGame();
+      g.balance = 2000;
+      expect(g.tapTurntable(const Cell(5, 3)), isNotNull); // on track
+      sink(g, const Cell(9, 1));
+      expect(g.tapTurntable(const Cell(9, 1)), isNotNull); // water
+      expect(g.tapTurntable(const Cell(5, 1)), isNull); // clear ground
+      expect(g.turntables, contains(const Cell(5, 1)));
+      expect(g.rampSiteError(const Cell(5, 1)), isNotNull,
+          reason: 'other items must not stack on a table');
     });
   });
 

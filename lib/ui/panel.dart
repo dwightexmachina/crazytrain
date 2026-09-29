@@ -225,6 +225,16 @@ class _ShopPanelState extends State<ShopPanel> {
               'One-way launcher: tap a clear cell, then a neighbor to aim. The train flies three cells and must land on aligned track — over water, chasms, even other lines. Tap a ramp to remove it.',
         ),
         _toolItem(
+          tool: Tool.turntable,
+          icon: Icons.sync_rounded,
+          title: 'Turntable',
+          tag: '\$${Game.priceTurntable}',
+          chip: '\$${Game.priceTurntable}',
+          enabled: game.balance >= Game.priceTurntable,
+          desc:
+              'A spinning platform at a line\'s end: trains roll on, turn around, and head back. Cap both ends of a dead-end line and it runs out-and-back — no loop needed.',
+        ),
+        _toolItem(
           tool: Tool.stop,
           icon: Icons.home_work_rounded,
           title: BuildingType.stop.label,
@@ -681,7 +691,9 @@ class _ShopPanelState extends State<ShopPanel> {
         'Tap flat straight track to raise a loop-de-loop. A train only makes it around with an active speed boost — lay a speed pad a cell or two before the hoop (or under a stalled train to send it through).',
       Tool.jumpRamp =>
         'Tap a clear flat cell to arm the ramp, then tap a neighboring cell to aim it. Run track into the ramp\'s tail: the train launches three cells forward and needs aligned track waiting at the landing spot. Ramps are one-way — a reversed train can\'t use them.',
-      Tool.turntable || Tool.dynamite => 'Coming soon.',
+      Tool.turntable =>
+        'Tap a clear flat cell at the end of a line: track auto-connects into the table, and trains bounce off it back the way they came. Two turntables make an out-and-back line — the station still pays each full round trip.',
+      Tool.dynamite => 'Coming soon.',
       Tool.none =>
         'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };

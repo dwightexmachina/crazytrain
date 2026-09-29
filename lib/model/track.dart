@@ -117,6 +117,13 @@ class PathStep {
           Dir.w => Offset(0, h),
         };
     final a = edgeMid(entry), b = edgeMid(exit);
+    if (entry == exit) {
+      // A turntable bounce: roll to the cell center, spin, roll back out.
+      final ctr = Offset(h, h);
+      return t < 0.5
+          ? Offset.lerp(a, ctr, t * 2)!
+          : Offset.lerp(ctr, a, (t - 0.5) * 2)!;
+    }
     if (entry.opposite == exit) {
       return Offset.lerp(a, b, t)!;
     }
@@ -169,7 +176,8 @@ List<PathStep>? traceLoop(Map<Cell, TrackKind> board, Cell start, Dir startExit,
     {Map<Cell, Cell> pads = const {},
     Map<Cell, Cell> tunnels = const {},
     Map<Cell, TrackSwitch> switches = const {},
-    Map<Cell, Dir> ramps = const {}}) {
+    Map<Cell, Dir> ramps = const {},
+    Set<Cell> turntables = const {}}) {
   final steps = <PathStep>[];
   var cell = start;
   var exit = startExit;
@@ -179,10 +187,22 @@ List<PathStep>? traceLoop(Map<Cell, TrackKind> board, Cell start, Dir startExit,
               pads.length +
               tunnels.length +
               switches.length +
-              ramps.length) +
+              ramps.length +
+              turntables.length) +
       4;
   for (var i = 0; i <= maxHops; i++) {
     final next = cell.step(exit);
+    if (turntables.contains(next)) {
+      // Roll onto the table, spin, and head back out the same edge. An
+      // out-and-back line closes as a palindrome: the walk passes back
+      // through [start] in reverse, bounces off the far turntable, and
+      // only the same-heading return closes the cycle (see below).
+      final entry = exit.opposite;
+      steps.add(PathStep(next, entry, entry));
+      cell = next;
+      exit = entry;
+      continue;
+    }
     final rampDir = ramps[next];
     if (rampDir != null) {
       final entry = exit.opposite;
@@ -237,7 +257,10 @@ List<PathStep>? traceLoop(Map<Cell, TrackKind> board, Cell start, Dir startExit,
     if (!piece.conn.contains(entry)) return null;
     final nextExit = piece.conn.firstWhere((d) => d != entry);
     steps.add(PathStep(next, entry, nextExit));
-    if (next == start) return steps;
+    // Close only on a same-heading return: a palindrome route (turntable
+    // out-and-back) passes through [start] in reverse first and must keep
+    // walking to the far end and back before the cycle truly closes.
+    if (next == start && nextExit == startExit) return steps;
     cell = next;
     exit = nextExit;
   }
