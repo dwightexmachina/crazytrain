@@ -1221,6 +1221,8 @@ class Game extends ChangeNotifier {
   /// beyond it — up to the next signal — is occupied by the other train.
   String? tapSignal(Cell c) {
     if (!inBounds(c)) return 'Out of bounds';
+    c = _fuzzyCell(
+        c, (n) => signals.contains(n) || board.containsKey(n));
     if (signals.contains(c)) {
       signals.remove(c);
       balance += priceSignal ~/ 2;
@@ -1239,11 +1241,33 @@ class Game extends ChangeNotifier {
     return null;
   }
 
+  /// Aim assist for cell-precise taps: [c] itself when it qualifies, else
+  /// the first edge-neighbor that does. Clicking "at the rail" shouldn't
+  /// demand pixel accuracy.
+  Cell _fuzzyCell(Cell c, bool Function(Cell) ok) {
+    if (ok(c)) return c;
+    for (final d in Dir.values) {
+      final n = c.step(d);
+      if (inBounds(n) && ok(n)) return n;
+    }
+    return c;
+  }
+
+  /// Whether a pad tap at [c] (with aim assist) would do something —
+  /// drives the hover tint so the preview never lies.
+  bool padTapValid(Cell c) =>
+      speedPads.contains(_fuzzyCell(c, _padSite)) ||
+      _padSite(_fuzzyCell(c, _padSite));
+  bool _padSite(Cell n) =>
+      speedPads.contains(n) ||
+      (board[n] != null && !board[n]!.isCurve);
+
   /// Place a speed pad on a straight track cell, or tap an existing one
   /// to remove it (half refund). Crossing a pad gives the train a
-  /// two-second burst of double speed.
+  /// two-second burst of double speed. Near-miss taps snap to the rail.
   String? tapSpeedPad(Cell c) {
     if (!inBounds(c)) return 'Out of bounds';
+    c = _fuzzyCell(c, _padSite);
     if (speedPads.contains(c)) {
       speedPads.remove(c);
       balance += priceSpeedPad ~/ 2;
@@ -1277,10 +1301,15 @@ class Game extends ChangeNotifier {
     return null;
   }
 
+  /// Whether a loop tap at [c] (with aim assist) would do something.
+  bool loopTapValid(Cell c) => _loopSite(_fuzzyCell(c, _loopSite));
+  bool _loopSite(Cell n) => loops.contains(n) || loopSiteError(n) == null;
+
   /// Place a loop-de-loop on flat straight track, or tap one to remove it
   /// (half refund). Trains need an active speed boost to make it around —
-  /// without one they stall short of the hoop.
+  /// without one they stall short of the hoop. Near-miss taps snap on.
   String? tapLoop(Cell c) {
+    c = _fuzzyCell(c, _loopSite);
     if (loops.contains(c)) {
       loops.remove(c);
       balance += priceLoop ~/ 2;

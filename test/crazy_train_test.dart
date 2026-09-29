@@ -1478,11 +1478,31 @@ void main() {
       expect(g.tapSpeedPad(const Cell(5, 3)), isNull); // top edge straight
       expect(g.speedPads, contains(const Cell(5, 3)));
       expect(g.balance, 850);
-      expect(g.tapSpeedPad(const Cell(3, 3)), isNotNull); // corner curve
-      expect(g.tapSpeedPad(const Cell(5, 5)), isNotNull); // empty ground
+      // Aim assist snaps corner-adjacent taps, so use a deep-interior
+      // cell (no rail within one step) for the honest refusal.
+      expect(g.tapSpeedPad(const Cell(6, 6)), isNotNull);
       expect(g.tapSpeedPad(const Cell(5, 3)), isNull); // toggle off
       expect(g.balance, 850 + Game.priceSpeedPad ~/ 2);
       expect(g.speedPads, isEmpty);
+    });
+
+    test('near-miss taps snap to the rail (aim assist)', () {
+      final g = flatGame();
+      g.balance = 2000;
+      // (5,2) is empty ground one cell off the top-edge straight (5,3):
+      // the tap must land on the rail, not error out.
+      expect(g.tapSpeedPad(const Cell(5, 2)), isNull);
+      expect(g.speedPads, contains(const Cell(5, 3)));
+      // A near-miss beside the existing pad removes it.
+      expect(g.tapSpeedPad(const Cell(5, 2)), isNull);
+      expect(g.speedPads, isEmpty);
+      // Loops and signals snap the same way.
+      expect(g.tapLoop(const Cell(9, 2)), isNull);
+      expect(g.loops, contains(const Cell(9, 3)));
+      expect(g.tapSignal(const Cell(6, 2)), isNull);
+      expect(g.signals, contains(const Cell(6, 3)));
+      // Far misses still refuse honestly.
+      expect(g.tapSpeedPad(const Cell(7, 0)), isNotNull);
     });
 
     test('crossing a pad doubles ground covered while the burst lasts', () {
@@ -1528,8 +1548,7 @@ void main() {
       g.balance = 2000;
       expect(g.tapLoop(const Cell(5, 3)), isNull);
       expect(g.loops, contains(const Cell(5, 3)));
-      expect(g.tapLoop(const Cell(3, 3)), isNotNull); // curve
-      expect(g.tapLoop(const Cell(5, 5)), isNotNull); // no track
+      expect(g.tapLoop(const Cell(6, 6)), isNotNull); // far from any rail
       sink(g, const Cell(9, 1));
       expect(g.tapLoop(const Cell(9, 1)), isNotNull); // water
       expect(g.tapLoop(const Cell(5, 3)), isNull); // remove

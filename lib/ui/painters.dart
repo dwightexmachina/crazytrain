@@ -745,14 +745,10 @@ class DynamicPainter extends CustomPainter {
           game.padSiteError(h) == null ? Pal.ghostOk : Pal.ghostBad,
         Tool.tunnel when game.pendingTunnel == null =>
           game.portalSiteError(h) == null ? Pal.ghostOk : Pal.ghostBad,
-        Tool.speedPad => game.speedPads.contains(h) ||
-                (game.board[h] != null && !game.board[h]!.isCurve)
-            ? Pal.ghostOk
-            : Pal.ghostBad,
+        Tool.speedPad =>
+          game.padTapValid(h) ? Pal.ghostOk : Pal.ghostBad,
         Tool.loopDeLoop =>
-          game.loops.contains(h) || game.loopSiteError(h) == null
-              ? Pal.ghostOk
-              : Pal.ghostBad,
+          game.loopTapValid(h) ? Pal.ghostOk : Pal.ghostBad,
         Tool.jumpRamp when game.pendingRamp == null =>
           game.ramps.containsKey(h) || game.rampSiteError(h) == null
               ? Pal.ghostOk
