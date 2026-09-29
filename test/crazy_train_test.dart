@@ -1262,6 +1262,16 @@ void main() {
       expect(ScenarioProgress.unlocked(6), isTrue);
     });
 
+    test('the unlock-all cheat opens every stop, reversibly, starlessly', () {
+      web.window.localStorage.clear();
+      expect(ScenarioProgress.unlocked(6), isFalse);
+      ScenarioProgress.toggleAllUnlocked();
+      expect(ScenarioProgress.unlocked(6), isTrue);
+      expect(ScenarioProgress.stars('thrill'), 0, reason: 'no fake stars');
+      ScenarioProgress.toggleAllUnlocked();
+      expect(ScenarioProgress.unlocked(6), isFalse);
+    });
+
     test('retired mission ids in storage never score stars', () {
       web.window.localStorage.clear();
       ScenarioProgress.markDone('ridge', 'thrift'); // a retired mission
@@ -1916,6 +1926,25 @@ void main() {
             reason: '${sc.name}: plate tap must open its panel — if this '
                 'fails the plate is buried or its hit box is offset');
       }
+    });
+
+    testWidgets('pressing * on the route map unlocks the whole line',
+        (tester) async {
+      web.window.localStorage.clear();
+      await toMap(tester);
+      await tester.tap(find.text('THRILL LINE').first);
+      await tester.pump();
+      expect(find.text('ALL ABOARD'), findsNothing,
+          reason: 'locked until the cheat');
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.digit8,
+          character: '*');
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.digit8);
+      await tester.pump();
+      await tester.tap(find.text('THRILL LINE').first);
+      await tester.pump();
+      expect(find.text('ALL ABOARD'), findsOneWidget,
+          reason: 'the last stop boards straight away');
+      expect(find.textContaining('all stops unlocked'), findsOneWidget);
     });
 
     testWidgets('clicks pass through the fading splash', (tester) async {

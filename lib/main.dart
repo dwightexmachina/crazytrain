@@ -74,6 +74,9 @@ class _TrainMakerAppState extends State<TrainMakerApp> {
               game?.setTool(Tool.none),
           const CharacterActivator('+'): () => game?.devGrant(),
           const CharacterActivator('='): () => game?.devGrant(),
+          // Dev cheat: '*' toggles every route-map stop open.
+          const CharacterActivator('*'): () =>
+              setState(ScenarioProgress.toggleAllUnlocked),
         },
         child: Focus(
           autofocus: true,

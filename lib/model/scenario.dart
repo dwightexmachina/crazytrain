@@ -101,10 +101,23 @@ class ScenarioProgress {
     web.window.localStorage.setItem(_celebratedKey, jsonEncode(list));
   }
 
+  /// Dev cheat: the '*' key toggles every stop open. Persisted, honest
+  /// (no fake stars), reversible.
+  static const _unlockAllKey = 'ct_unlock_all';
+  static bool get allUnlocked =>
+      web.window.localStorage.getItem(_unlockAllKey) == '1';
+  static void toggleAllUnlocked() {
+    if (allUnlocked) {
+      web.window.localStorage.removeItem(_unlockAllKey);
+    } else {
+      web.window.localStorage.setItem(_unlockAllKey, '1');
+    }
+  }
+
   /// The first stop is always open; each later stop opens once the previous
-  /// one has at least one star.
+  /// one has at least one star (or the unlock-all cheat is on).
   static bool unlocked(int index) =>
-      index == 0 || stars(Scenarios.all[index - 1].id) > 0;
+      allUnlocked || index == 0 || stars(Scenarios.all[index - 1].id) > 0;
 
   static void resetAll() {
     web.window.localStorage.removeItem(_key);

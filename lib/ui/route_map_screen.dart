@@ -178,12 +178,15 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
               ),
             ),
           ),
-          // Build stamp, so anyone can tell which build a tab is running.
-          const Positioned(
+          // Build stamp, so anyone can tell which build a tab is running
+          // (plus a padlock note when the unlock-all cheat is active).
+          Positioned(
             left: 10,
             bottom: 6,
-            child: Text('build $kBuildHash',
-                style: TextStyle(
+            child: Text(
+                'build $kBuildHash'
+                '${ScenarioProgress.allUnlocked ? ' · all stops unlocked' : ''}',
+                style: const TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.5,
