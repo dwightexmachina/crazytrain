@@ -57,7 +57,17 @@ class ScenarioProgress {
   static Set<String> done(String scenarioId) =>
       {...?_read()[scenarioId]?.cast<String>()};
 
-  static int stars(String scenarioId) => done(scenarioId).length;
+  /// Earned stars, counting only missions the scenario still has — ids
+  /// from retired missions linger in storage but never score.
+  static int stars(String scenarioId) {
+    final d = done(scenarioId);
+    for (final sc in Scenarios.all) {
+      if (sc.id == scenarioId) {
+        return sc.missions.where((m) => d.contains(m.id)).length;
+      }
+    }
+    return d.length;
+  }
 
   static void markDone(String scenarioId, String missionId) {
     final all = _read();
@@ -161,13 +171,10 @@ class Scenarios {
         Mission('summit', 'Serve the depot on the pass',
             (g) => _buildingServed(g, _ridgePassDepot)),
         Mission(
-            'thrift',
-            'Link the valleys having spent under \$1,200 '
-            '(Start over to retry)',
-            (g) =>
-                g.moneySpent <= 1200 &&
-                _routeVisits(g, (c) => c.x <= _ridgeWestMax) &&
-                _routeVisits(g, (c) => c.x >= _ridgeEastMin)),
+            'bore',
+            'Send a train through a tunnel',
+            (g) => g.trains.any(
+                (t) => t.path?.any((st) => st.tunnelTo != null) ?? false)),
       ],
       build: _buildRidge,
     ),

@@ -150,7 +150,6 @@ class Game extends ChangeNotifier {
       scenario == null ? <String>{} : ScenarioProgress.done(scenario!.id);
   int cowsShooed = 0; // cows relocated by the horn, for mission checks
   int bestLapPayout = 0; // richest single-lap payout so far
-  int moneySpent = 0; // lifetime spend this world (refunds don't reduce it)
   double _missionTimer = 0;
 
   /// True while the LINE CLEAR celebration should be on screen (set when
@@ -246,7 +245,6 @@ class Game extends ChangeNotifier {
     deeds = 0;
     cowsShooed = 0;
     bestLapPayout = 0;
-    moneySpent = 0;
     trains
       ..clear()
       ..add(Train(cars: 1, reversed: false));
@@ -908,7 +906,6 @@ class Game extends ChangeNotifier {
       if (d != null) deck[p.cell] = d;
     }
     balance -= plan.cost;
-    moneySpent += plan.cost;
     _rebuildPath();
     _save();
     notifyListeners();
@@ -974,7 +971,6 @@ class Game extends ChangeNotifier {
       return 'Not enough money';
     }
     balance -= type.price + flatCost;
-    moneySpent += type.price + flatCost;
     if (flatCost > 0 && toasts.length < 6) {
       toasts.add(Toast(c.x + 0.5, c.y - 0.3, 'Leveled −\$$flatCost'));
     }
@@ -995,7 +991,6 @@ class Game extends ChangeNotifier {
   bool buyCar() {
     if (balance < priceCar) return false;
     balance -= priceCar;
-    moneySpent += priceCar;
     // The shorter train gets the new car.
     trains.reduce((a, b) => a.cars <= b.cars ? a : b).cars++;
     _save();
@@ -1006,7 +1001,6 @@ class Game extends ChangeNotifier {
   bool buySecondTrain() {
     if (trains.length > 1 || balance < priceSecondTrain) return false;
     balance -= priceSecondTrain;
-    moneySpent += priceSecondTrain;
     final t = Train(cars: 1, reversed: true);
     trains.add(t);
     _rebuildPath();
@@ -1057,7 +1051,6 @@ class Game extends ChangeNotifier {
     if (idx < 0) return 'Tap a cell on the line';
     if (balance < priceSecondTrain) return 'Not enough money';
     balance -= priceSecondTrain;
-    moneySpent += priceSecondTrain;
     final t = Train(cars: 1, reversed: true)
       ..path = p
       ..lastPath = p
@@ -1087,7 +1080,6 @@ class Game extends ChangeNotifier {
     if (!board.containsKey(c)) return 'Signals sit on track';
     if (balance < priceSignal) return 'Not enough money';
     balance -= priceSignal;
-    moneySpent += priceSignal;
     signals.add(c);
     structureRev++;
     _save();
@@ -1158,7 +1150,6 @@ class Game extends ChangeNotifier {
           : 'Not enough money';
     }
     balance -= cost;
-    moneySpent += cost;
     _collapseBrokenTunnels();
     structureRev++;
     _save();
@@ -1177,7 +1168,6 @@ class Game extends ChangeNotifier {
     final cost = heights.stepsIn(plan) * priceTerraformStep;
     if (cost > balance) return 'Not enough money';
     balance -= cost;
-    moneySpent += cost;
     heights.apply(plan);
     _collapseBrokenTunnels();
     structureRev++;
@@ -1250,7 +1240,6 @@ class Game extends ChangeNotifier {
     if (!canGrow(side)) return false;
     if (balance < deedPrice) return false;
     balance -= deedPrice;
-    moneySpent += deedPrice;
     deeds++;
     final dx = side == Dir.w ? expandStep : 0;
     final dy = side == Dir.n ? expandStep : 0;
@@ -1314,7 +1303,6 @@ class Game extends ChangeNotifier {
       return null;
     }
     balance -= priceLaunchpad;
-    moneySpent += priceLaunchpad;
     launchpads[first] = c;
     launchpads[c] = first;
     pendingPad = null;
@@ -1390,7 +1378,6 @@ class Game extends ChangeNotifier {
     final err = boreError(first, c);
     if (err != null) return err;
     balance -= priceTunnel;
-    moneySpent += priceTunnel;
     tunnels[first] = c;
     tunnels[c] = first;
     pendingTunnel = null;
@@ -1451,7 +1438,6 @@ class Game extends ChangeNotifier {
     if (piece.conn.contains(d)) return 'The junction must face a free side';
     if (balance < priceSwitch) return 'Not enough money';
     balance -= priceSwitch;
-    moneySpent += priceSwitch;
     final legs = piece.conn.toList();
     switches[first] = TrackSwitch(first, d, legs[0], legs[1]);
     board.remove(first);
@@ -1752,7 +1738,6 @@ class Game extends ChangeNotifier {
     if (!hit) return null;
     if (balance < priceRerail) return 'Not enough money';
     balance -= priceRerail;
-    moneySpent += priceRerail;
     for (final t in trains) {
       t.wrecked = false;
     }
@@ -1828,7 +1813,7 @@ class Game extends ChangeNotifier {
     }
     if (won &&
         sc.missions.isNotEmpty &&
-        missionsDone.length >= sc.missions.length &&
+        sc.missions.every((m) => missionsDone.contains(m.id)) &&
         !ScenarioProgress.celebrated(sc.id)) {
       ScenarioProgress.markCelebrated(sc.id);
       lineClearPending = true;
@@ -1901,7 +1886,6 @@ class Game extends ChangeNotifier {
       'cars': cars,
       'shooed': cowsShooed,
       'bestLap': bestLapPayout,
-      'spent': moneySpent,
     };
     web.window.localStorage.setItem(_key, jsonEncode(data));
     if (scenario == null) {
@@ -2043,7 +2027,6 @@ class Game extends ChangeNotifier {
       balance = data['balance'] as int;
       cowsShooed = data['shooed'] as int? ?? 0;
       bestLapPayout = data['bestLap'] as int? ?? 0;
-      moneySpent = data['spent'] as int? ?? 0;
       signals.clear();
       for (final c in (data['signals'] as List? ?? [])) {
         signals.add(Cell.parse(c as String));

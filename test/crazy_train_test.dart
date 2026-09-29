@@ -1069,8 +1069,36 @@ void main() {
       g.commitTrack(detour);
       expect(g.path, isNotNull, reason: 'loop must close over the pass');
       expect(g.checkMissions(), isTrue);
-      expect(g.missionsDone, containsAll(['link', 'summit', 'thrift']),
-          reason: 'the saddle route also fits the \$1,200 budget');
+      expect(g.missionsDone, containsAll(['link', 'summit']));
+      expect(g.missionsDone.contains('bore'), isFalse,
+          reason: 'the saddle route never goes underground');
+    });
+
+    test('ridge bore mission: a loop through the tunnel earns the star', () {
+      final g = scenarioGame('ridge');
+      g.balance = 100000;
+      expect(g.tapTunnel(const Cell(9, 9)), isNull);
+      expect(g.tapTunnel(const Cell(14, 9)), isNull);
+      for (var y = 6; y <= 10; y++) {
+        g.bulldoze(Cell(6, y));
+      }
+      // Out over the saddle, down the east flank into the east portal…
+      g.commitTrack(g.planTrack([
+        const Cell(5, 6),
+        for (var y = 6; y >= 3; y--) Cell(6, y),
+        for (var x = 7; x <= 15; x++) Cell(x, 3),
+        for (var y = 4; y <= 9; y++) Cell(15, y),
+      ]));
+      // …and home from the west portal's mouth.
+      g.commitTrack(g.planTrack([
+        for (var x = 8; x >= 6; x--) Cell(x, 9),
+        const Cell(6, 10),
+        const Cell(5, 10),
+      ]));
+      expect(g.path, isNotNull, reason: 'loop must close through the bore');
+      expect(g.path!.any((st) => st.tunnelTo != null), isTrue);
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, containsAll(['link', 'bore']));
     });
 
     test('archipelago builds five dry islands in a wet lagoon', () {
@@ -1110,15 +1138,12 @@ void main() {
           reason: 'the far islands are still unserved');
     });
 
-    test('moneySpent counts purchases and ignores refunds', () {
-      final g = flatGame();
-      g.balance = 1000;
-      final before = g.moneySpent;
-      final plan = g.planTrack(const [Cell(4, 1), Cell(5, 1), Cell(6, 1)]);
-      g.commitTrack(plan);
-      expect(g.moneySpent, before + plan.cost);
-      g.bulldoze(const Cell(5, 1)); // refund must not reduce spend
-      expect(g.moneySpent, before + plan.cost);
+    test('retired mission ids in storage never score stars', () {
+      web.window.localStorage.clear();
+      ScenarioProgress.markDone('ridge', 'thrift'); // a retired mission
+      ScenarioProgress.markDone('ridge', 'link');
+      expect(ScenarioProgress.stars('ridge'), 1,
+          reason: 'only missions the scenario still has count');
     });
 
     test('the final star fires LINE CLEAR exactly once', () {
