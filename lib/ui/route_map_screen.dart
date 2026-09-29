@@ -108,13 +108,15 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                           color: Pal.muted)),
                 ]),
           ),
-          // Station plates.
+          // Station plates. Centered via a wide hit box, NOT a paint-only
+          // FractionalTranslation: hit tests outside a widget's own box are
+          // dropped, which made half of every plate a dead zone.
           for (var i = 0; i < Scenarios.all.length; i++)
             Positioned(
-              left: px(kStationPos[i]),
+              left: px(kStationPos[i]) - 160,
               top: py(kStationPos[i]) + 15,
-              child: FractionalTranslation(
-                translation: const Offset(-0.5, 0),
+              width: 320,
+              child: Center(
                 child: _StationPlate(
                   scenario: Scenarios.all[i],
                   stars: ScenarioProgress.stars(Scenarios.all[i].id),
@@ -126,10 +128,10 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             ),
           // Sandbox roundhouse plate.
           Positioned(
-            left: px(_roundhousePos),
+            left: px(_roundhousePos) - 160,
             top: py(_roundhousePos) + 4,
-            child: FractionalTranslation(
-              translation: const Offset(-0.5, 0),
+            width: 320,
+            child: Center(
               child: _Plate(
                 selected: false,
                 locked: false,

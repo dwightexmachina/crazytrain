@@ -1786,11 +1786,14 @@ void main() {
       await toMap(tester);
       for (final sc in Scenarios.all) {
         // Plates come before the panel in the tree: .first is the plate.
-        await tester.tap(find.text(sc.name).first);
+        // Tap LEFT of center: under the old FractionalTranslation
+        // centering that half of the plate was a hit-test dead zone.
+        final plate = find.text(sc.name).first;
+        await tester.tapAt(tester.getCenter(plate) - const Offset(25, 0));
         await tester.pump();
         expect(find.text(sc.name), findsAtLeastNWidgets(2),
             reason: '${sc.name}: plate tap must open its panel — if this '
-                'fails the plate is buried under the detail panel');
+                'fails the plate is buried or its hit box is offset');
       }
     });
 
