@@ -85,13 +85,13 @@ Upgrades the home station once per world: the lap-formula payout is
   renders grander.
 - *Missions:* keeps earnings targets ("$1,500 in one lap") viable late.
 
-## Mission mapping for future levels
+## Mission mapping — shipped
 
-| Level (stop) | Stars planned around |
+| Level (stop) | Stars |
 |---|---|
-| Switchback Pass (●●●) | Turntable (out-and-back in a valley too tight to loop) · speed pads + lap-time target · two-train signal survival |
-| Terraformer's Folly (●●●) | Dynamite (excavate through chaos) · loop-de-loop ridden · jump ramp across a scar |
-| Possible 7th stop — "Thrill Line" | Pure showcase: chain loops, multi-jump lap, best-lap leaderboard vs. your own record |
+| Switchback Pass (●●●) · 🟢 | Run a line off a turntable · lap under 16s on 45+ track (lastLapSteps/lastLapTime) · 10 crash-free dual-train laps (dualLaps, reset on crash) |
+| Terraformer's Folly (●●●) · 🟢 | 4 dynamite blasts · ride a loop-de-loop 5× · land 15 ramp jumps |
+| Possible 7th stop — "Thrill Line" · ⚪ | Pure showcase: chain loops, multi-jump lap, best-lap leaderboard vs. your own record (route map would need a 7th station) |
 
 Existing levels stay untouched; all items are available in the sandbox
 and every scenario once shipped.

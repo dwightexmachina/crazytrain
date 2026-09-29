@@ -170,6 +170,9 @@ class Game extends ChangeNotifier {
   /// complete from-payout-to-payout lap exists). Sim time = dt × speed,
   /// so fast-forward can't cheat it.
   double? bestLapTime;
+  int lastLapSteps = 0; // route length of the last completed lap
+  double lastLapTime = 0; // sim-seconds of the last completed lap
+  int dualLaps = 0; // laps banked with 2+ trains running; crashes reset it
   int cols = startCols, rows = startRows;
   int deeds = 0; // land deeds bought; each one raises the next deed's price
   int balance = 80;
@@ -303,6 +306,9 @@ class Game extends ChangeNotifier {
     cowsPlowed = 0;
     grandTerminal = false;
     bestLapTime = null;
+    lastLapSteps = 0;
+    lastLapTime = 0;
+    dualLaps = 0;
     final sc = scenario;
     if (sc != null && sc.build != null) {
       sc.build!(this); // the scenario lays out its whole world
@@ -513,6 +519,13 @@ class Game extends ChangeNotifier {
 
   void _rebuildPath() {
     structureRev++;
+    // Re-resolve building triggers FIRST (their track may have been
+    // bulldozed — or just rebuilt somewhere else beside them): the trace
+    // below must see the healed trigger, not the stale one.
+    for (final b in buildings) {
+      if (b.trigger != null && !board.containsKey(b.trigger)) b.trigger = null;
+      b.trigger ??= _adjacentTrack(b.cell);
+    }
     final trigger = station.trigger;
     for (final tr in trains) {
       List<PathStep>? p;
@@ -551,11 +564,6 @@ class Game extends ChangeNotifier {
       } else if (tr.lastPath != null && tr.s >= tr.lastPath!.length) {
         tr.s = 0;
       }
-    }
-    // Re-resolve building triggers (their track may have been bulldozed).
-    for (final b in buildings) {
-      if (b.trigger != null && !board.containsKey(b.trigger)) b.trigger = null;
-      b.trigger ??= _adjacentTrack(b.cell);
     }
   }
 
@@ -2061,9 +2069,15 @@ class Game extends ChangeNotifier {
         balance += payout;
         if (payout > bestLapPayout) bestLapPayout = payout;
         // Record the lap time — but never the partial first lap.
-        if (tr.lapValid &&
-            (bestLapTime == null || tr.lapClock < bestLapTime!)) {
-          bestLapTime = tr.lapClock;
+        if (tr.lapValid) {
+          if (bestLapTime == null || tr.lapClock < bestLapTime!) {
+            bestLapTime = tr.lapClock;
+          }
+          lastLapSteps = len;
+          lastLapTime = tr.lapClock;
+        }
+        if (trains.length >= 2 && !trains.any((t) => t.wrecked)) {
+          dualLaps++;
         }
         tr.lapValid = true;
         tr.lapClock = 0;
@@ -2103,6 +2117,7 @@ class Game extends ChangeNotifier {
     if (hit.isEmpty) return;
     a.wrecked = true;
     b.wrecked = true;
+    dualLaps = 0; // the crash-free streak is over
     final at = hit.first;
     toasts.add(Toast(at.x + 0.5, at.y - 0.4, 'CRASH!', big: true));
   }
@@ -2267,6 +2282,7 @@ class Game extends ChangeNotifier {
       'cowCatcher': cowCatcher,
       'plowed': cowsPlowed,
       'grandTerminal': grandTerminal,
+      'dualLaps': dualLaps,
       'bestLapTime': bestLapTime,
       'trains': [
         for (final t in trains) {'cars': t.cars, 'rev': t.reversed},
@@ -2447,6 +2463,7 @@ class Game extends ChangeNotifier {
       cowCatcher = data['cowCatcher'] as bool? ?? false;
       cowsPlowed = data['plowed'] as int? ?? 0;
       grandTerminal = data['grandTerminal'] as bool? ?? false;
+      dualLaps = data['dualLaps'] as int? ?? 0;
       bestLapTime = (data['bestLapTime'] as num?)?.toDouble();
       trains
         ..clear()

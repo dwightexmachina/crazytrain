@@ -1140,6 +1140,80 @@ void main() {
           reason: 'the far islands are still unserved');
     });
 
+    test('switchback: serpentine walls, turntable and pace missions', () {
+      final g = scenarioGame('switchback');
+      expect(g.path, isNotNull);
+      g.balance = 100000;
+      // The wall band is unclimbable: a straight north shot dies on it.
+      final blocked =
+          g.planTrack([for (var y = 13; y >= 8; y--) Cell(9, y)]);
+      expect(blocked.pieces.length, lessThan(4));
+      // But the router snakes the corridor: south zone to the north zone
+      // must thread the east gap and the west gap in turn.
+      final route = g.routeTrack(const Cell(9, 13), const Cell(9, 2));
+      expect(route, isNotNull);
+      expect(route!.any((c) => c.x >= 19 && c.y >= 6 && c.y <= 9), isTrue,
+          reason: 'threads the east gap');
+      // Missions: raze the loop entirely and run a turntable shuttle past
+      // the station's south side instead.
+      expect(g.checkMissions(), isFalse);
+      for (final cell in g.board.keys.toList()) {
+        g.bulldoze(cell, scrapTrains: false);
+      }
+      expect(g.board, isEmpty);
+      expect(g.tapTurntable(const Cell(2, 14)), isNull);
+      expect(g.tapTurntable(const Cell(11, 14)), isNull);
+      g.commitTrack(
+          g.planTrack([for (var x = 3; x <= 10; x++) Cell(x, 14)]));
+      expect(g.path, isNotNull, reason: 'shuttle line closes');
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, contains('shuttle'));
+      // Pace + convoy latch off their counters.
+      g.lastLapSteps = 50;
+      g.lastLapTime = 14.5;
+      g.dualLaps = 10;
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, containsAll(['flyer', 'convoy']));
+    });
+
+    test('folly: a drowned scar and item-counter missions', () {
+      final g = scenarioGame('folly');
+      expect(g.path, isNotNull);
+      // The scar runs wet down the middle of the map.
+      for (var y = 0; y < g.rows; y++) {
+        expect(g.isWater(Cell(12, y)) || g.isWater(Cell(13, y)), isTrue,
+            reason: 'scar row $y');
+      }
+      expect(g.checkMissions(), isFalse);
+      g.blastsFired = 4;
+      g.loopsRidden = 5;
+      g.jumpsMade = 15;
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone,
+          containsAll(['demolition', 'showman', 'daredevil']));
+      expect(g.lineClearPending, isTrue,
+          reason: 'all three stars fire the celebration');
+    });
+
+    test('dual-lap streak counts and resets on a crash', () {
+      final g = flatGame();
+      g.cows.clear();
+      g.balance = 100000;
+      g.armSecondTrain();
+      expect(g.placeSecondTrain(g.path![10].cell), isNull);
+      final before = g.dualLaps;
+      for (var i = 0; i < 60 && g.dualLaps == before; i++) {
+        g.tick(0.5);
+        if (g.trains.any((t) => t.wrecked)) break;
+      }
+      // Either a lap banked with both running, or they crashed and reset.
+      if (g.trains.any((t) => t.wrecked)) {
+        expect(g.dualLaps, 0);
+      } else {
+        expect(g.dualLaps, greaterThan(before));
+      }
+    });
+
     test('retired mission ids in storage never score stars', () {
       web.window.localStorage.clear();
       ScenarioProgress.markDone('ridge', 'thrift'); // a retired mission

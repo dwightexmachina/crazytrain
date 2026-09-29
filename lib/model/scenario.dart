@@ -203,18 +203,43 @@ class Scenarios {
       ],
       build: _buildArchipelago,
     ),
-    const Scenario(
+    Scenario(
       id: 'switchback',
       name: 'SWITCHBACK PASS',
       difficulty: 3,
-      blurb: 'One narrow valley, two trains, zero room for error.',
+      blurb: 'A serpentine corridor between unclimbable walls — too tight '
+          'to loop. Turntables, speed pads and nerve.',
+      facts: const ['START \$700', 'MAP 24×16', 'SERPENTINE'],
+      missions: [
+        Mission('shuttle', 'Run a line off a turntable',
+            (g) => _routeVisits(g, g.turntables.contains)),
+        Mission(
+            'flyer',
+            'Clock a lap under 16s on 45+ track',
+            (g) => g.lastLapSteps >= 45 && g.lastLapTime < 16),
+        Mission(
+            'convoy',
+            'Bank 10 laps with two trains running, crash-free',
+            (g) => g.dualLaps >= 10),
+      ],
+      build: _buildSwitchback,
     ),
-    const Scenario(
+    Scenario(
       id: 'folly',
       name: "TERRAFORMER'S FOLLY",
       difficulty: 3,
-      blurb: 'Nothing is flat, the low ground is flooded, and the budget '
-          'is unsympathetic.',
+      blurb: 'Rumpled chaos split by a drowned scar. Blast it flat, loop '
+          'it, or jump straight over.',
+      facts: const ['START \$800', 'MAP 26×16', 'SCARRED LAND'],
+      missions: [
+        Mission('demolition', 'Reshape the world with 4 dynamite blasts',
+            (g) => g.blastsFired >= 4),
+        Mission('showman', 'Ride a loop-de-loop 5 times',
+            (g) => g.loopsRidden >= 5),
+        Mission('daredevil', 'Land 15 ramp jumps',
+            (g) => g.jumpsMade >= 15),
+      ],
+      build: _buildFolly,
     ),
   ];
 
@@ -485,6 +510,82 @@ void _buildArchipelago(Game g) {
   }
   _scatter(g, rng, 8, ok: (c) => _archIsles.any((i) => i.contains(c)));
   g.balance = 600;
+}
+
+// ---- Switchback Pass: a serpentine corridor between 3-step walls.
+
+void _wallRow(Game g, int cellY, int x0, int x1) {
+  for (var vx = x0; vx <= x1 + 1; vx++) {
+    g.heights.setVertex(vx, cellY, 3);
+    g.heights.setVertex(vx, cellY + 1, 3);
+  }
+}
+
+void _buildSwitchback(Game g) {
+  final rng = math.Random(7105);
+  g.cols = 24;
+  g.rows = 16;
+  g.heights.reset(g.cols, g.rows);
+  // Two wall bands force an S: south zone → east gap → middle zone →
+  // west gap → north zone. Every wall face is a 3-step cliff.
+  _wallRow(g, 10, 0, 18); // gap on the east
+  _wallRow(g, 5, 5, 23); // gap on the west
+  _loopWithStation(g, x0: 2, y0: 12, x1: 6, y1: 15, station: const Cell(7, 13));
+  g.buildings.add(Building(const Cell(11, 7), BuildingType.stop));
+  g.buildings.add(Building(const Cell(4, 2), BuildingType.depot));
+  g.buildings.add(Building(const Cell(20, 2), BuildingType.stop));
+  _scatter(g, rng, 10,
+      ok: (c) => c.y != 5 && c.y != 10); // keep the walls bare
+  _dropCows(g, rng, 2);
+  g.balance = 700;
+}
+
+// ---- Terraformer's Folly: seeded chaos split by a drowned scar.
+
+void _buildFolly(Game g) {
+  final rng = math.Random(7106);
+  g.cols = 26;
+  g.rows = 16;
+  g.heights.reset(g.cols, g.rows);
+  // Rumple everything with seeded knolls and pits…
+  for (var i = 0; i < 14; i++) {
+    final vx = 1 + rng.nextInt(g.cols - 1);
+    final vy = 1 + rng.nextInt(g.rows - 1);
+    _hill(g, vx, vy, 1 + rng.nextInt(3));
+  }
+  for (var i = 0; i < 6; i++) {
+    final vx = 1 + rng.nextInt(g.cols - 1);
+    final vy = 1 + rng.nextInt(g.rows - 1);
+    for (var dx = 0; dx <= 1; dx++) {
+      for (var dy = 0; dy <= 1; dy++) {
+        if (g.heights.vAt(vx + dx, vy + dy) <= 0) {
+          g.heights.setVertex(vx + dx, vy + dy, -1);
+        }
+      }
+    }
+  }
+  // …carve the scar: a drowned two-column gash down the middle…
+  for (var vy = 0; vy <= g.rows; vy++) {
+    g.heights.setVertex(12, vy, -3);
+    g.heights.setVertex(13, vy, -3);
+    g.heights.setVertex(14, vy, -3);
+  }
+  // …and press flat aprons for the starter loop and the far payouts.
+  for (var vx = 1; vx <= 9; vx++) {
+    for (var vy = 4; vy <= 11; vy++) {
+      g.heights.setVertex(vx, vy, 0);
+    }
+  }
+  for (var vx = 16; vx <= 23; vx++) {
+    for (var vy = 2; vy <= 12; vy++) {
+      g.heights.setVertex(vx, vy, 0);
+    }
+  }
+  _loopWithStation(g, x0: 2, y0: 5, x1: 6, y1: 9, station: const Cell(4, 10));
+  g.buildings.add(Building(const Cell(18, 4), BuildingType.stop));
+  g.buildings.add(Building(const Cell(20, 10), BuildingType.depot));
+  _scatter(g, rng, 8, ok: (c) => c.x <= 9 || c.x >= 16);
+  g.balance = 800;
 }
 
 bool _gorgeSpansBanks(Game g) {
