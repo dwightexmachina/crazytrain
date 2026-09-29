@@ -685,6 +685,38 @@ class Game extends ChangeNotifier {
     return out;
   }
 
+  /// How many of the piece at [c]'s connections actually join something
+  /// (at matching rail height), plus the single live side when exactly one
+  /// does. A piece with at most one live connection is an OPEN END.
+  (int, Dir?) _endInfo(Cell c) {
+    final k = board[c];
+    if (k == null) return (0, null);
+    var count = 0;
+    Dir? side;
+    for (final d in k.conn) {
+      final theirs = _connectorLevel(c, d);
+      if (theirs != null && (theirs - railEdgeZ(c, d)).abs() < 0.01) {
+        count++;
+        side = d;
+      }
+    }
+    return (count, count == 1 ? side : null);
+  }
+
+  /// Whether the existing piece at [c] may be re-bent into [newKind] by a
+  /// plan passing through: open ends bend freely as long as their live
+  /// side stays connected (solid track still needs a switch), and cells
+  /// carrying a speed pad or loop can't bend into a curve.
+  bool _canRebend(Cell c, TrackKind newKind) {
+    if (newKind.isCurve && (speedPads.contains(c) || loops.contains(c))) {
+      return false;
+    }
+    final (count, side) = _endInfo(c);
+    if (count == 0) return true; // an orphan piece rewrites freely
+    if (count == 1) return newKind.conn.contains(side);
+    return false;
+  }
+
   /// Orientation for a drag endpoint ([leg] = its one known direction) or a
   /// single tap ([leg] null): snap toward adjacent connectors when a valid
   /// piece results, else fall back to the drag axis (or EW for a tap).
@@ -784,7 +816,12 @@ class Game extends ChangeNotifier {
           pieces.add(Planned(c, kind, 0)); // pass over matching track free
           continue;
         }
-        break; // conflicting track: stop the run here
+        // An open end re-bends for free toward the incoming line, keeping
+        // its live connection; solid track still needs a switch.
+        if (!_canRebend(c, kind)) break;
+        pieces.add(Planned(c, kind, 0,
+            bridge: wet, deckLevel: wet ? wetLvl : null));
+        continue;
       }
       final price = _piecePrice(kind, c);
       if (cost + price > balance) {
@@ -843,15 +880,21 @@ class Game extends ChangeNotifier {
       final TrackKind? kind;
       if (toPrev != null) {
         kind = TrackKind.fromDirs(toPrev, toNext);
-      } else if (existing != null) {
-        if (!existing.conn.contains(toNext)) return null;
+      } else if (existing != null && existing.conn.contains(toNext)) {
         kind = existing; // leave the anchor piece along its own alignment
       } else {
+        // Empty anchor, or an anchor end being dragged out sideways —
+        // the endpoint snap decides its shape (rebend validated below).
         kind = _endpointKind(c, toNext,
             railLevel: wet ? wetLvl!.toDouble() : null);
       }
       if (kind == null) return null;
-      if (existing != null && existing != kind) return null;
+      if (existing != null && existing != kind && !_canRebend(c, kind)) {
+        return null;
+      }
+      // A rebend costs a token amount so routes prefer riding rails as
+      // they are over rewriting them.
+      final rebent = existing != null && existing != kind;
       final int eIn, eOut;
       if (wet) {
         eIn = eOut = wetLvl!;
@@ -871,7 +914,8 @@ class Game extends ChangeNotifier {
       if (entryH != null && eIn != entryH) return null; // grade mismatch
       // A token cost on free rides keeps the search from wandering along
       // existing rail for no reason; planTrack still prices them at $0.
-      final price = existing == kind ? 1 : _piecePrice(kind, c);
+      final price =
+          existing == kind ? 1 : (rebent ? 2 : _piecePrice(kind, c));
       return (eOut, price);
     }
 
@@ -936,14 +980,23 @@ class Game extends ChangeNotifier {
       final (_, _, g, c, toPrev, h) = pop();
       final ck = key(c, toPrev, h);
       if (g > (gScore[ck] ?? 1 << 30)) continue; // stale heap entry
-      // Lock onto existing track at the target: only arrivals facing one of
-      // its open connections count; other approaches keep searching.
+      // Lock onto existing track at the target: arrivals facing one of its
+      // open connections count as-is, and an open END also accepts any
+      // arrival it can bend toward while keeping its live side connected.
       final targetPiece = board[to];
       if (c == to &&
           targetPiece != null &&
           toPrev != null &&
           !targetPiece.conn.contains(toPrev)) {
-        continue;
+        final (cnt, side) = _endInfo(to);
+        final TrackKind? bent = switch (cnt) {
+          0 => (toPrev == Dir.e || toPrev == Dir.w)
+              ? TrackKind.ew
+              : TrackKind.ns,
+          1 => TrackKind.fromDirs(toPrev, side!),
+          _ => null,
+        };
+        if (bent == null || !_canRebend(to, bent)) continue;
       }
       if (c == to) {
         // Reconstruct the cell chain; planTrack finalizes endpoint kinds.

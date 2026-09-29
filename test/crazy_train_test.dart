@@ -1338,14 +1338,68 @@ void main() {
       final g = flatGame();
       g.balance = 100000;
       g.commitTrack(g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(4, 2)]));
-      // Target the curve itself: it only connects w and s, so the straight
-      // shot along row 1 (arriving from the east) must be rejected and the
-      // route has to come around through the adjoining track at (3,1).
+      // Target the curve itself: it only connects w and s, so an arrival
+      // from the east must be rejected — the route comes in through the
+      // adjoining track at (3,1) or by re-bending the (4,2) stub end.
       final route = g.routeTrack(const Cell(7, 1), const Cell(4, 1))!;
-      expect(route[route.length - 2], const Cell(3, 1),
-          reason: 'locks onto the open leg, never rams the closed corner');
+      final arrival = route[route.length - 2];
+      expect(arrival == const Cell(3, 1) || arrival == const Cell(4, 2),
+          isTrue,
+          reason: 'locks onto a live leg, never rams the closed corner');
       final plan = g.planTrack(route);
       expect(plan.pieces.length, route.length);
+    });
+
+    test('an open end re-bends to meet a line arriving at a right angle', () {
+      final g = flatGame();
+      g.balance = 10000;
+      // A stub along row 1: its end at (6,1) points east into nothing.
+      g.commitTrack(
+          g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(5, 1), Cell(6, 1)]));
+      expect(g.board[const Cell(6, 1)], TrackKind.ew);
+      // Drag in from the SOUTH (open ground on row 2): the end must bend
+      // to a curve joining the arrival while keeping its live west side.
+      final plan = g.planTrack(const [Cell(6, 2), Cell(6, 1)]);
+      expect(plan.pieces.length, 2, reason: 'the end cell is consumed');
+      expect(plan.pieces.last.kind, TrackKind.sw);
+      expect(plan.pieces.last.cost, 0, reason: 'bending an end is free');
+      g.commitTrack(plan);
+      expect(g.board[const Cell(6, 1)], TrackKind.sw);
+    });
+
+    test('the router drives straight into a bendable end', () {
+      final g = flatGame();
+      g.balance = 10000;
+      g.commitTrack(
+          g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(5, 1), Cell(6, 1)]));
+      // Old behavior: an arrival needing a bend was rejected, forcing a
+      // long detour to the dangling east side. Now the router may drive in
+      // and bend the end — from (9,2) the cheap route comes along row 2
+      // and turns north into it.
+      final route = g.routeTrack(const Cell(9, 2), const Cell(6, 1));
+      expect(route, isNotNull);
+      expect(route!.last, const Cell(6, 1));
+      final plan = g.planTrack(route);
+      expect(plan.pieces.length, route.length);
+      g.commitTrack(plan);
+      expect(g.board[const Cell(6, 1)], TrackKind.sw,
+          reason: 'the end bent south to meet the incoming line');
+    });
+
+    test('solid track and item-laden ends refuse to bend', () {
+      final g = flatGame();
+      g.balance = 10000;
+      g.commitTrack(
+          g.planTrack(const [Cell(3, 1), Cell(4, 1), Cell(5, 1), Cell(6, 1)]));
+      // Mid-run track (both sides live) never bends: (5,1) stays sacred.
+      final mid = g.planTrack(const [Cell(5, 2), Cell(5, 1)]);
+      expect(mid.pieces.length, lessThan(2),
+          reason: 'T-ing into solid track still needs a switch');
+      // A speed pad pins its end straight: no curve rebend.
+      g.tapSpeedPad(const Cell(6, 1));
+      final padded = g.planTrack(const [Cell(6, 2), Cell(6, 1)]);
+      expect(padded.pieces.length, lessThan(2),
+          reason: 'pads demand straights');
     });
 
     test('routes bridge across the gorge and the plan prices it', () {
