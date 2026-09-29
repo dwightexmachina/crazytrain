@@ -91,7 +91,7 @@ Upgrades the home station once per world: the lap-formula payout is
 |---|---|
 | Switchback Pass (●●●) · 🟢 | Run a line off a turntable · lap under 16s on 45+ track (lastLapSteps/lastLapTime) · 10 crash-free dual-train laps (dualLaps, reset on crash) |
 | Terraformer's Folly (●●●) · 🟢 | 4 dynamite blasts · ride a loop-de-loop 5× · land 15 ramp jumps |
-| Possible 7th stop — "Thrill Line" · ⚪ | Pure showcase: chain loops, multi-jump lap, best-lap leaderboard vs. your own record (route map would need a 7th station) |
+| Thrill Line (●●●, 7th stop) · 🟢 | Chain two loops in one lap · land jumps from two ramps in one lap · lap under 12s on 30+ track. Ships with pads + a loop pre-installed on the starter circuit; the route map grew its 7th station |
 
 Existing levels stay untouched; all items are available in the sandbox
 and every scenario once shipped.

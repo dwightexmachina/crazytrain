@@ -29,6 +29,7 @@ const List<Offset> kStationPos = [
   Offset(720, 330),
   Offset(600, 235),
   Offset(690, 92),
+  Offset(430, 125),
 ];
 const Offset _roundhousePos = Offset(688, 584);
 const Size _posterSize = Size(1060, 640);
@@ -692,6 +693,22 @@ class _RouteMapPainter extends CustomPainter {
           ..strokeCap = StrokeCap.round
           ..strokeWidth = 9
           ..color = const Color(0xCCC2A98C));
+    // Thrill Line: a tiny loop-the-loop standing on a stick of rail.
+    final ringPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..color = const Color(0xFFC2A98C);
+    c.drawLine(const Offset(310, 158), const Offset(392, 158),
+        Paint()
+          ..strokeWidth = 5
+          ..strokeCap = StrokeCap.round
+          ..color = const Color(0xFFC2A98C));
+    c.drawCircle(const Offset(351, 140), 17, ringPaint);
+    c.drawCircle(const Offset(351, 140), 17,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6
+          ..color = Colors.white);
     // Folly nubs.
     final nub = Paint()..color = const Color(0xFFC2A98C);
     final nubStroke = Paint()
@@ -719,8 +736,9 @@ class _RouteMapPainter extends CustomPainter {
     (Offset(620, 408), Offset(690, 380), Offset(720, 330)),
     (Offset(750, 280), Offset(660, 260), Offset(600, 235)),
     (Offset(540, 210), Offset(640, 140), Offset(690, 92)),
+    (Offset(620, 55), Offset(510, 70), Offset(430, 125)),
   ];
-  static const _segmentsTo = [0, 1, 2, 3, 4, 5];
+  static const _segmentsTo = [0, 1, 2, 3, 4, 5, 6];
 
   Path _routePath({int? toStation}) {
     final count = toStation == null ? _segs.length : _segmentsTo[toStation];

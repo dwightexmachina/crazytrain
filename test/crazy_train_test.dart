@@ -1215,6 +1215,53 @@ void main() {
       }
     });
 
+    test('thrill line: showground with the stunt kit pre-installed', () {
+      final g = scenarioGame('thrill');
+      expect(g.path, isNotNull);
+      expect(g.balance, 1000);
+      // The house kit sits on the starter circuit, ready to demo itself.
+      expect(g.loops, contains(const Cell(8, 3)));
+      expect(g.speedPads, containsAll(const [Cell(7, 3), Cell(9, 3)]));
+      expect(g.path!.any((st) => st.cell == const Cell(8, 3)), isTrue);
+      // The canal is wet mid-map.
+      expect(g.isWater(const Cell(14, 8)), isTrue);
+    });
+
+    test('thrill line missions: combo, stuntman, record run', () {
+      final g = scenarioGame('thrill');
+      g.balance = 100000;
+      expect(g.checkMissions(), isFalse);
+      // A second loop on the circuit + two ridden = the combo.
+      expect(g.tapLoop(const Cell(6, 3)), isNull);
+      g.loopsRidden = 2;
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, contains('combo'));
+      // Two ramps in the same lap: cut two gaps and jump them both.
+      for (final c in const [Cell(5, 3), Cell(6, 3), Cell(7, 3)]) {
+        g.bulldoze(c);
+      }
+      g.tapRamp(const Cell(5, 3));
+      g.tapRamp(const Cell(6, 3)); // aims east, lands on (8,3)
+      for (final c in const [Cell(9, 8), Cell(8, 8), Cell(7, 8)]) {
+        g.bulldoze(c);
+      }
+      g.tapRamp(const Cell(9, 8));
+      g.tapRamp(const Cell(8, 8)); // aims west, lands on (6,8)
+      expect(g.path, isNotNull, reason: 'double-jump circuit closes');
+      g.jumpsMade = 2;
+      g.lastLapSteps = 35;
+      g.lastLapTime = 11.0;
+      expect(g.checkMissions(), isTrue);
+      expect(g.missionsDone, containsAll(['stuntman', 'recordrun']));
+    });
+
+    test('folly stars unlock the thrill line', () {
+      web.window.localStorage.clear();
+      expect(ScenarioProgress.unlocked(6), isFalse);
+      ScenarioProgress.markDone('folly', 'demolition');
+      expect(ScenarioProgress.unlocked(6), isTrue);
+    });
+
     test('retired mission ids in storage never score stars', () {
       web.window.localStorage.clear();
       ScenarioProgress.markDone('ridge', 'thrift'); // a retired mission

@@ -241,6 +241,31 @@ class Scenarios {
       ],
       build: _buildFolly,
     ),
+    Scenario(
+      id: 'thrill',
+      name: 'THRILL LINE',
+      difficulty: 3,
+      blurb: 'The showground: loops, ramps and speed pads under one big '
+          'sky. Nothing here is sensible, and that is the point.',
+      facts: const ['START \$1000', 'MAP 26×16', 'SHOWGROUND'],
+      missions: [
+        Mission(
+            'combo',
+            'Chain two loop-de-loops in one lap',
+            (g) => _routeCount(g, g.loops.contains) >= 2 &&
+                g.loopsRidden >= 2),
+        Mission(
+            'stuntman',
+            'Land jumps from two ramps in one lap',
+            (g) => _routeCount(g, g.ramps.containsKey) >= 2 &&
+                g.jumpsMade >= 2),
+        Mission(
+            'recordrun',
+            'Clock a lap under 12s on 30+ track',
+            (g) => g.lastLapSteps >= 30 && g.lastLapTime < 12),
+      ],
+      build: _buildThrill,
+    ),
   ];
 
   static Scenario byId(String id) => all.firstWhere((s) => s.id == id);
@@ -586,6 +611,52 @@ void _buildFolly(Game g) {
   g.buildings.add(Building(const Cell(20, 10), BuildingType.depot));
   _scatter(g, rng, 8, ok: (c) => c.x <= 9 || c.x >= 16);
   g.balance = 800;
+}
+
+/// The most distinct cells matching [pred] that any single traced route
+/// covers — "two loops in one lap" means one route holds both.
+int _routeCount(Game g, bool Function(Cell) pred) {
+  var best = 0;
+  for (final tr in g.trains) {
+    final p = tr.path;
+    if (p == null) continue;
+    final cells = {
+      for (final st in p)
+        if (pred(st.cell)) st.cell,
+    };
+    if (cells.length > best) best = cells.length;
+  }
+  return best;
+}
+
+// ---- Thrill Line: a flat showground built for stunts.
+
+void _buildThrill(Game g) {
+  final rng = math.Random(7107);
+  g.cols = 26;
+  g.rows = 16;
+  g.heights.reset(g.cols, g.rows);
+  // A canal splits showground from fairground — jump it or bridge it.
+  for (var vy = 2; vy <= 14; vy++) {
+    g.heights.setVertex(14, vy, -1);
+    g.heights.setVertex(15, vy, -1);
+    g.heights.setVertex(16, vy, -1);
+  }
+  _hill(g, 2, 14, 2);
+  _hill(g, 24, 2, 2);
+  // A roomy starter circuit with the house stunt kit pre-installed:
+  // speed pads bracketing a loop-de-loop on the top straight, so the
+  // level demonstrates itself on lap one.
+  _loopWithStation(g, x0: 3, y0: 3, x1: 10, y1: 8, station: const Cell(6, 9));
+  g.speedPads.add(const Cell(7, 3));
+  g.speedPads.add(const Cell(9, 3));
+  g.loops.add(const Cell(8, 3));
+  // Fairground payouts wait across the canal.
+  g.buildings.add(Building(const Cell(19, 4), BuildingType.stop));
+  g.buildings.add(Building(const Cell(20, 11), BuildingType.depot));
+  _scatter(g, rng, 10, ok: (c) => c.x <= 12 || c.x >= 17);
+  _dropCows(g, rng, 1);
+  g.balance = 1000;
 }
 
 bool _gorgeSpansBanks(Game g) {
