@@ -33,6 +33,11 @@ const List<Offset> kStationPos = [
 const Offset _roundhousePos = Offset(688, 584);
 const Size _posterSize = Size(1060, 640);
 
+/// Short git hash injected by the deploy workflow; 'dev' when run locally.
+/// Shown in the corner so a stale-cached tab is never a mystery again.
+const String kBuildHash =
+    String.fromEnvironment('BUILD_HASH', defaultValue: 'dev');
+
 class _RouteMapScreenState extends State<RouteMapScreen> {
   late int _sel;
   final Map<String, Game> _previews = {};
@@ -147,6 +152,17 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                 ]),
               ),
             ),
+          ),
+          // Build stamp, so anyone can tell which build a tab is running.
+          const Positioned(
+            left: 10,
+            bottom: 6,
+            child: Text('build $kBuildHash',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                    color: Pal.faint)),
           ),
           // Detail panel for the selected stop.
           Positioned(

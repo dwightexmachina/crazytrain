@@ -30,7 +30,34 @@ jobs:
           flutter-version: 3.41.2
       - run: flutter pub get
       # base-href must match the repo name so a project page (…/<repo>/) loads.
-      - run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+      # No service worker (--pwa-strategy=none): the game deploys many times
+      # a day and the SW's caching kept serving stale builds; Pages' own
+      # ~10-minute HTTP cache is plenty. BUILD_HASH stamps the route map.
+      - run: >
+          flutter build web --release
+          --base-href "/${{ github.event.repository.name }}/"
+          --pwa-strategy=none
+          --dart-define=BUILD_HASH=${GITHUB_SHA::7}
+      # Kill-switch for service workers already installed in players'
+      # browsers from earlier builds: the browser still checks this URL for
+      # updates, finds this self-destructing worker, which takes over
+      # immediately, wipes every cache, unregisters, and reloads the tab.
+      - name: Service worker kill-switch
+        run: |
+          cat > build/web/flutter_service_worker.js <<'EOF'
+          self.addEventListener('install', (e) => {
+            self.skipWaiting();
+          });
+          self.addEventListener('activate', (e) => {
+            e.waitUntil((async () => {
+              const keys = await caches.keys();
+              await Promise.all(keys.map((k) => caches.delete(k)));
+              await self.registration.unregister();
+              const clients = await self.clients.matchAll({ type: 'window' });
+              clients.forEach((c) => c.navigate(c.url));
+            })());
+          });
+          EOF
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
