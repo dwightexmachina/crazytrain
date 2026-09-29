@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -450,13 +451,70 @@ Map<Cell, (double, double, double)> _visibleTrees(Game game) {
   return out;
 }
 
+/// Holds the recorded display list of the static board between frames.
+class BoardPictureCache {
+  ui.Picture? pic;
+  int rev = -1;
+  int rot = -1;
+  double s0 = 1;
+  Offset o0 = Offset.zero;
+}
+
+/// Replays a cached display list of the static board. The full board is
+/// recorded once per structure change (or rotation); panning and zooming
+/// become a cheap affine replay — engine-side, resolution-independent —
+/// instead of re-executing the whole terrain paint in Dart every frame.
+class CachedBoardPainter extends CustomPainter {
+  final Game game;
+  final double zoom;
+  final Offset pan;
+  final int rot;
+  final BoardPictureCache cache;
+  final int rev;
+  CachedBoardPainter(this.game, this.zoom, this.pan, this.rot, this.cache)
+      : rev = game.structureRev;
+
+  @override
+  void paint(Canvas c, Size size) {
+    final v = IsoView.of(size, game, zoom, pan, rot: rot);
+    if (cache.pic == null || cache.rev != rev || cache.rot != rot) {
+      final rec = ui.PictureRecorder();
+      StaticBoardPainter(game, zoom, pan, rot, cull: false)
+          .paint(Canvas(rec), size);
+      cache.pic = rec.endRecording();
+      cache.rev = rev;
+      cache.rot = rot;
+      cache.s0 = v.s;
+      cache.o0 = v.o;
+    }
+    // screen = o + s·proj(world), so mapping the recorded (o0, s0) frame
+    // onto the current one is a translate–scale–translate.
+    final k = v.s / cache.s0;
+    c.save();
+    c.translate(v.o.dx, v.o.dy);
+    c.scale(k, k);
+    c.translate(-cache.o0.dx, -cache.o0.dy);
+    c.drawPicture(cache.pic!);
+    c.restore();
+  }
+
+  @override
+  bool shouldRepaint(CachedBoardPainter old) =>
+      old.rev != rev ||
+      old.zoom != zoom ||
+      old.pan != pan ||
+      old.rot != rot;
+}
+
 class StaticBoardPainter extends CustomPainter {
   final Game game;
   final int rev;
   final double zoom;
   final Offset pan;
   final int rot;
-  StaticBoardPainter(this.game, this.zoom, this.pan, this.rot)
+  final bool cull; // recording for the picture cache paints the full board
+  StaticBoardPainter(this.game, this.zoom, this.pan, this.rot,
+      {this.cull = true})
       : rev = game.structureRev;
 
   @override
@@ -502,10 +560,11 @@ class StaticBoardPainter extends CustomPainter {
         final maxX = math.max(math.max(c0.dx, c1.dx), math.max(c2.dx, c3.dx));
         final minY = math.min(math.min(c0.dy, c1.dy), math.min(c2.dy, c3.dy));
         final maxY = math.max(math.max(c0.dy, c1.dy), math.max(c2.dy, c3.dy));
-        if (maxX < cullRect.left ||
-            minX > cullRect.right ||
-            maxY < cullRect.top ||
-            minY > cullRect.bottom) {
+        if (cull &&
+            (maxX < cullRect.left ||
+                minX > cullRect.right ||
+                maxY < cullRect.top ||
+                minY > cullRect.bottom)) {
           continue;
         }
         final tri1 = [(xd, yd, ha.toDouble()), (xd + 1, yd, hb.toDouble()), (xd, yd + 1, he.toDouble())];

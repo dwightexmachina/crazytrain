@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../model/game.dart';
@@ -87,13 +88,63 @@ class ShopPanel extends StatefulWidget {
 
 class _ShopPanelState extends State<ShopPanel> {
   final ScrollController _scroll = ScrollController();
+  List<Object?> _lastSnap = const [];
 
   Game get game => widget.game;
 
   @override
+  void initState() {
+    super.initState();
+    _lastSnap = _snapshot();
+    game.addListener(_onGame);
+  }
+
+  @override
+  void didUpdateWidget(ShopPanel old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.game, widget.game)) {
+      old.game.removeListener(_onGame);
+      widget.game.addListener(_onGame);
+      _lastSnap = _snapshot();
+    }
+  }
+
+  @override
   void dispose() {
+    game.removeListener(_onGame);
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// Everything the panel actually displays. The game notifies every tick
+  /// while trains move; rebuilding twenty tiles at 60fps for an unchanged
+  /// panel is pure waste, so only a changed snapshot triggers setState.
+  List<Object?> _snapshot() => [
+        game.balance,
+        game.tool,
+        game.speed,
+        game.path == null,
+        game.cowBlocked,
+        game.loopStalled,
+        game.placingTrain,
+        game.trains.any((t) => t.wrecked),
+        game.trains.length,
+        game.cars,
+        game.trackLength,
+        game.projectedPayout,
+        game.missionsDone.length,
+        game.deeds,
+        game.cowCatcher,
+        game.grandTerminal,
+        for (final d in Dir.values) game.canGrow(d),
+      ];
+
+  void _onGame() {
+    final snap = _snapshot();
+    if (!listEquals(snap, _lastSnap)) {
+      _lastSnap = snap;
+      setState(() {});
+    }
   }
 
   String _money(int p) =>
@@ -411,42 +462,39 @@ class _ShopPanelState extends State<ShopPanel> {
         color: Pal.chromeBg,
         border: Border(left: BorderSide(color: Pal.chromeLine)),
       ),
-      child: ListenableBuilder(
-        listenable: game,
-        builder: (context, _) => Scrollbar(
+      child: Scrollbar(
+        controller: _scroll,
+        thumbVisibility: true,
+        child: ListView(
           controller: _scroll,
-          thumbVisibility: true,
-          child: ListView(
-            controller: _scroll,
-            padding: const EdgeInsets.all(12),
-            children: [
-              _brandRow(context),
+          padding: const EdgeInsets.all(12),
+          children: [
+            _brandRow(context),
+            const SizedBox(height: 8),
+            _statusChip(),
+            const SizedBox(height: 8),
+            _controlsRow(),
+            const SizedBox(height: 10),
+            _balanceCard(),
+            if (game.scenario != null) ...[
               const SizedBox(height: 8),
-              _statusChip(),
-              const SizedBox(height: 8),
-              _controlsRow(),
-              const SizedBox(height: 10),
-              _balanceCard(),
-              if (game.scenario != null) ...[
-                const SizedBox(height: 8),
-                _missionsCard(),
-              ],
-              const SizedBox(height: 12),
-              _sectionLabel('TOOLS'),
-              _grid(_tools()),
-              const SizedBox(height: 10),
-              _sectionLabel('BUILD'),
-              _grid(_build()),
-              const SizedBox(height: 10),
-              _sectionLabel('TERRAFORM'),
-              _grid(_terraform()),
-              const SizedBox(height: 10),
-              _sectionLabel('EXPAND'),
-              _grid(_expand()),
-              const SizedBox(height: 12),
-              _hintCard(),
+              _missionsCard(),
             ],
-          ),
+            const SizedBox(height: 12),
+            _sectionLabel('TOOLS'),
+            _grid(_tools()),
+            const SizedBox(height: 10),
+            _sectionLabel('BUILD'),
+            _grid(_build()),
+            const SizedBox(height: 10),
+            _sectionLabel('TERRAFORM'),
+            _grid(_terraform()),
+            const SizedBox(height: 10),
+            _sectionLabel('EXPAND'),
+            _grid(_expand()),
+            const SizedBox(height: 12),
+            _hintCard(),
+          ],
         ),
       ),
     );

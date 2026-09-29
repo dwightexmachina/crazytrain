@@ -2106,7 +2106,7 @@ class Game extends ChangeNotifier {
         }
       }
     }
-    if (paidOut) _save();
+    if (paidOut) _saveThrottled();
   }
 
   /// Select-mode tap on an engine: flip that train's travel direction.
@@ -2194,6 +2194,8 @@ class Game extends ChangeNotifier {
 
   void tick(double dt) {
     var dirty = false;
+    _sinceSave += dt;
+    if (_savePending && _sinceSave >= _saveWindow) _save();
     for (final t in toasts) {
       t.age += dt;
     }
@@ -2282,7 +2284,24 @@ class Game extends ChangeNotifier {
   /// Persist immediately — used when leaving for the route map.
   void saveNow() => _save();
 
+  // Lap payouts arrive every few seconds forever; serializing the whole
+  // world each time is waste. Payout-driven saves coalesce to one per
+  // window; explicit player actions still save instantly.
+  static const double _saveWindow = 3; // seconds between payout saves
+  double _sinceSave = 1e9;
+  bool _savePending = false;
+
+  void _saveThrottled() {
+    if (_sinceSave < _saveWindow) {
+      _savePending = true;
+    } else {
+      _save();
+    }
+  }
+
   void _save() {
+    _sinceSave = 0;
+    _savePending = false;
     final data = {
       'board': {for (final e in board.entries) e.key.toString(): e.value.index},
       'buildings': [

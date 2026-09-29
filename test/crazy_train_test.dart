@@ -1661,6 +1661,39 @@ void main() {
     });
   });
 
+  group('save throttling', () {
+    test('payout saves coalesce to one per window', () {
+      final g = flatGame();
+      g.cows.clear();
+      final len = g.path!.length.toDouble();
+      // First payout saves immediately (fresh counter)…
+      g.s = len - 0.5;
+      g.tick(0.4);
+      final raw1 = web.window.localStorage.getItem('ct_save_v3');
+      expect(raw1, isNotNull);
+      // …a second payout inside the window is deferred…
+      g.s = len - 0.5;
+      g.tick(0.4);
+      expect(web.window.localStorage.getItem('ct_save_v3'), raw1,
+          reason: 'inside the window: no new write');
+      // …and flushes once the window passes.
+      g.tick(3.1);
+      expect(web.window.localStorage.getItem('ct_save_v3'), isNot(raw1));
+    });
+
+    test('explicit actions still save instantly', () {
+      final g = flatGame();
+      g.cows.clear();
+      g.s = g.path!.length - 0.5;
+      g.tick(0.4); // payout: save + fresh window
+      g.balance = 5000;
+      g.commitTrack(g.planTrack(const [Cell(4, 1), Cell(5, 1)]));
+      final raw = web.window.localStorage.getItem('ct_save_v3')!;
+      expect(raw.contains('"balance":${g.balance}'), isTrue,
+          reason: 'building writes through immediately');
+    });
+  });
+
   group('route map', () {
     Future<void> toMap(WidgetTester tester) async {
       await tester.pumpWidget(const TrainMakerApp());

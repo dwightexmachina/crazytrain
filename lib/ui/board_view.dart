@@ -26,6 +26,7 @@ class _BoardViewState extends State<BoardView>
   final List<Cell> _dragCells = []; // holds just the drag's anchor cell
   Cell? _routeTarget; // last routed hover cell, to skip repeat work
   final ValueNotifier<TrackPlan?> _plan = ValueNotifier(null);
+  final BoardPictureCache _boardCache = BoardPictureCache();
   final ValueNotifier<Cell?> _hover = ValueNotifier(null);
 
   // Camera: whole-board fit at zoom 1, scroll/pinch to zoom, drag (no tool)
@@ -385,8 +386,8 @@ class _BoardViewState extends State<BoardView>
               child: ListenableBuilder(
                 listenable: Listenable.merge([game, _zoom, _pan, _rot]),
                 builder: (context, child) => CustomPaint(
-                  painter: StaticBoardPainter(
-                      game, _zoom.value, _pan.value, _rot.value),
+                  painter: CachedBoardPainter(
+                      game, _zoom.value, _pan.value, _rot.value, _boardCache),
                   isComplex: true,
                   willChange: false,
                 ),
