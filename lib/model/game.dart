@@ -119,6 +119,9 @@ class Game extends ChangeNotifier {
   static const int priceLoop = 450; // vertical loop-de-loop on a straight
   static const int priceRamp = 250; // one-way jump ramp, flies 3 cells
   static const int priceTurntable = 500; // reverses trains: out-and-back
+  static const int priceDynamite = 100; // per blast: craters a 2x2 area
+  static const int priceCowCatcher = 200; // fleet upgrade: plow, don't stop
+  static const int priceGrandTerminal = 1000; // doubles the lap formula
   static const int priceSecondTrain = 1500; // opposite-direction engine
   static const int priceRerail = 250; // crane fee after a crash
   static const double tilesPerSecond = 2.2;
@@ -158,6 +161,10 @@ class Game extends ChangeNotifier {
   Cell? pendingRamp; // armed ramp awaiting its aim tap
   int jumpsMade = 0; // engine launches off any ramp (persisted)
   final Set<Cell> turntables = {}; // reversal platforms at line ends
+  int blastsFired = 0; // dynamite detonations (persisted)
+  bool cowCatcher = false; // fleet plows cows aside for a small toll
+  int cowsPlowed = 0; // cows shoved by the catcher (persisted)
+  bool grandTerminal = false; // station upgrade: lap formula pays double
 
   /// Sim-seconds of the best full lap any train has run (null until a
   /// complete from-payout-to-payout lap exists). Sim time = dt × speed,
@@ -209,7 +216,7 @@ class Game extends ChangeNotifier {
     for (final t in trains) {
       final p = t.path;
       if (p == null) continue;
-      sum += t.cars * p.length;
+      sum += t.cars * p.length * (grandTerminal ? 2 : 1);
       for (final b in buildings) {
         if (b.type.bonus > 0 &&
             b.trigger != null &&
@@ -291,6 +298,10 @@ class Game extends ChangeNotifier {
     pendingRamp = null;
     jumpsMade = 0;
     turntables.clear();
+    blastsFired = 0;
+    cowCatcher = false;
+    cowsPlowed = 0;
+    grandTerminal = false;
     bestLapTime = null;
     final sc = scenario;
     if (sc != null && sc.build != null) {
@@ -1321,8 +1332,66 @@ class Game extends ChangeNotifier {
     return null;
   }
 
-  // Wired to the toolbar ahead of its implementation lane.
-  String? blast(Cell c) => 'Coming soon';
+  /// The 3x3 vertex patch under the 2x2 cell block anchored at [c].
+  List<(int, int)> _blastVerts(Cell c) => [
+        for (var dx = 0; dx <= 2; dx++)
+          for (var dy = 0; dy <= 2; dy++)
+            if (c.x + dx <= cols && c.y + dy <= rows) (c.x + dx, c.y + dy),
+      ];
+
+  /// Whether dynamite at [c] would move any ground (drives the hover tint).
+  bool canBlast(Cell c) {
+    if (!inBounds(c)) return false;
+    for (final (vx, vy) in _blastVerts(c)) {
+      if (heights.vAt(vx, vy) > -1 && !_lockedVertex(vx, vy)) return true;
+    }
+    return false;
+  }
+
+  /// Dynamite: crater the 2x2 cell block at [c] to below the water line.
+  /// Vertices pinned under structures don't move; low ground floods.
+  String? blast(Cell c) {
+    if (!inBounds(c)) return 'Out of bounds';
+    if (!canBlast(c)) return 'Nothing to blast';
+    if (balance < priceDynamite) return 'Not enough money';
+    balance -= priceDynamite;
+    for (final (vx, vy) in _blastVerts(c)) {
+      if (!_lockedVertex(vx, vy) && heights.vAt(vx, vy) > -1) {
+        heights.setVertex(vx, vy, -1);
+      }
+    }
+    blastsFired++;
+    structureRev++;
+    _collapseBrokenTunnels();
+    _rebuildPath();
+    if (toasts.length < 6) {
+      toasts.add(Toast(c.x + 1.0, c.y - 0.4, 'BOOM!', big: true));
+    }
+    _save();
+    notifyListeners();
+    return null;
+  }
+
+  /// Fleet upgrade: engines shove cows off the line instead of stopping,
+  /// collecting a small toll per cow.
+  void buyCowCatcher() {
+    if (cowCatcher || balance < priceCowCatcher) return;
+    balance -= priceCowCatcher;
+    cowCatcher = true;
+    _save();
+    notifyListeners();
+  }
+
+  /// Station upgrade: the terminus becomes a Grand Terminal and the lap
+  /// formula pays double. Once per world.
+  void buyGrandTerminal() {
+    if (grandTerminal || balance < priceGrandTerminal) return;
+    balance -= priceGrandTerminal;
+    grandTerminal = true;
+    structureRev++;
+    _save();
+    notifyListeners();
+  }
 
   // ------------------------------------------------------------ terraform (elevation)
 
@@ -1942,9 +2011,23 @@ class Game extends ChangeNotifier {
       final nextIdx = (idx + 1) % len;
       final nextCell = p[nextIdx].cell;
       if (_cowAt(nextCell)) {
-        cowBlocked = true;
-        tr.s = math.min(tr.s, idx + 0.94); // pull up short of the cow
-        break;
+        if (cowCatcher) {
+          // The catcher shoves the cow clear and collects a moo toll.
+          for (final cow
+              in cows.where((k) => k.cell == nextCell).toList()) {
+            _relocateCow(cow, nextCell);
+            cowsPlowed++;
+            balance += 5;
+            if (toasts.length < 6) {
+              toasts.add(
+                  Toast(nextCell.x + 0.5, nextCell.y - 0.4, 'MOO +\$5'));
+            }
+          }
+        } else {
+          cowBlocked = true;
+          tr.s = math.min(tr.s, idx + 0.94); // pull up short of the cow
+          break;
+        }
       }
       if (loops.contains(nextCell) && tr.boost <= 0) {
         // No momentum: the train stalls short of the hoop. A speed pad
@@ -1973,7 +2056,8 @@ class Game extends ChangeNotifier {
       adv -= toBoundary * f;
       if (tr.s >= len) {
         tr.s = 0;
-        final payout = tr.cars * len + tr.lapBonus;
+        final payout =
+            (tr.cars * len) * (grandTerminal ? 2 : 1) + tr.lapBonus;
         balance += payout;
         if (payout > bestLapPayout) bestLapPayout = payout;
         // Record the lap time — but never the partial first lap.
@@ -2179,6 +2263,10 @@ class Game extends ChangeNotifier {
       'ramps': [for (final e in ramps.entries) '${e.key}|${e.value.index}'],
       'jumps': jumpsMade,
       'turntables': [for (final c in turntables) c.toString()],
+      'blasts': blastsFired,
+      'cowCatcher': cowCatcher,
+      'plowed': cowsPlowed,
+      'grandTerminal': grandTerminal,
       'bestLapTime': bestLapTime,
       'trains': [
         for (final t in trains) {'cars': t.cars, 'rev': t.reversed},
@@ -2355,6 +2443,10 @@ class Game extends ChangeNotifier {
       for (final c in (data['turntables'] as List? ?? [])) {
         turntables.add(Cell.parse(c as String));
       }
+      blastsFired = data['blasts'] as int? ?? 0;
+      cowCatcher = data['cowCatcher'] as bool? ?? false;
+      cowsPlowed = data['plowed'] as int? ?? 0;
+      grandTerminal = data['grandTerminal'] as bool? ?? false;
       bestLapTime = (data['bestLapTime'] as num?)?.toDouble();
       trains
         ..clear()

@@ -234,6 +234,49 @@ class _ShopPanelState extends State<ShopPanel> {
           desc:
               'A spinning platform at a line\'s end: trains roll on, turn around, and head back. Cap both ends of a dead-end line and it runs out-and-back — no loop needed.',
         ),
+        if (!game.cowCatcher)
+          _ShopItem(
+            icon: Icons.agriculture_rounded,
+            title: 'Cow catcher',
+            tag: '\$${Game.priceCowCatcher}',
+            chip: '\$${Game.priceCowCatcher}',
+            enabled: game.balance >= Game.priceCowCatcher,
+            desc:
+                'Fleet upgrade: engines shove cows off the line instead of stopping — and collect a \$5 moo toll per cow.',
+            onTap: game.buyCowCatcher,
+          )
+        else
+          const _ShopItem(
+            icon: Icons.agriculture_rounded,
+            title: 'Cow catcher',
+            tag: 'OWNED',
+            chip: 'owned',
+            chipMuted: true,
+            enabled: false,
+            desc:
+                'Your engines plow through cows and pocket a \$5 toll each.',
+          ),
+        if (!game.grandTerminal)
+          _ShopItem(
+            icon: Icons.account_balance_rounded,
+            title: 'Grand Terminal',
+            tag: '\$1k',
+            chip: '\$${Game.priceGrandTerminal}',
+            enabled: game.balance >= Game.priceGrandTerminal,
+            desc:
+                'Upgrade the terminus: the lap formula (cars × track) pays double, forever. Once per world.',
+            onTap: game.buyGrandTerminal,
+          )
+        else
+          const _ShopItem(
+            icon: Icons.account_balance_rounded,
+            title: 'Grand Terminal',
+            tag: 'OWNED',
+            chip: 'owned',
+            chipMuted: true,
+            enabled: false,
+            desc: 'The terminus pays double on every lap formula.',
+          ),
         _toolItem(
           tool: Tool.stop,
           icon: Icons.home_work_rounded,
@@ -316,6 +359,16 @@ class _ShopPanelState extends State<ShopPanel> {
           enabled: game.balance >= Game.priceTerraformStep,
           desc:
               'Match the grade: press a tile, then drag — everything you cross is leveled to it.',
+        ),
+        _toolItem(
+          tool: Tool.dynamite,
+          icon: Icons.local_fire_department_rounded,
+          title: 'Dynamite',
+          tag: '\$${Game.priceDynamite}',
+          chip: '\$${Game.priceDynamite} / blast',
+          enabled: game.balance >= Game.priceDynamite,
+          desc:
+              'One tap craters a 2×2 patch to below the water line — instant lake. Ground pinned under track and buildings shrugs it off.',
         ),
       ];
 
@@ -693,7 +746,8 @@ class _ShopPanelState extends State<ShopPanel> {
         'Tap a clear flat cell to arm the ramp, then tap a neighboring cell to aim it. Run track into the ramp\'s tail: the train launches three cells forward and needs aligned track waiting at the landing spot. Ramps are one-way — a reversed train can\'t use them.',
       Tool.turntable =>
         'Tap a clear flat cell at the end of a line: track auto-connects into the table, and trains bounce off it back the way they came. Two turntables make an out-and-back line — the station still pays each full round trip.',
-      Tool.dynamite => 'Coming soon.',
+      Tool.dynamite =>
+        'Tap the ground to blow a 2×2 crater below the water line — water floods straight in. Vertices pinned under track, buildings and other structures don\'t budge. \$${Game.priceDynamite} a blast.',
       Tool.none =>
         'Select mode: tap a switch to flip it, drag to pan, scroll to zoom. Pick a tool to build — Esc brings you back here. The train pays every full lap: cars × track length, plus stop bonuses. Honk at cows blocking the line!',
     };

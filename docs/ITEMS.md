@@ -70,11 +70,12 @@ locks under structures). The fun version of the lower-land tool.
   target; counter `blastsFired` (persisted).
 - *Missions:* "Blast a lake and bridge it."
 
-### Cow catcher — $200 per train · 🟢
-Engine upgrade: cows on the line are shoved aside without stopping, each
-paying a **$5 moo toll**. Converts the hazard into a trickle economy.
-- *Engine:* per-train flag (persisted); `_advance` cow check relocates
-  instead of blocking; counter `cowsPlowed` (persisted).
+### Cow catcher — $200 fleet upgrade · 🟢
+Fleet upgrade (one purchase covers every train): cows on the line are
+shoved aside without stopping, each paying a **$5 moo toll**. Converts
+the hazard into a trickle economy.
+- *Engine:* world-scoped flag (persisted); `_advance` cow check
+  relocates instead of blocking; counter `cowsPlowed` (persisted).
 - *Missions:* "Plow through 10 cows."
 
 ### Grand Terminal — $1,000 upgrade · 🟢

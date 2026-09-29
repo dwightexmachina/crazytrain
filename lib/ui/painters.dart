@@ -708,6 +708,7 @@ class DynamicPainter extends CustomPainter {
           game.turntables.contains(h) || game.turntableSiteError(h) == null
               ? Pal.ghostOk
               : Pal.ghostBad,
+        Tool.dynamite => game.canBlast(h) ? Pal.ghostOk : Pal.ghostBad,
         _ => Pal.hover,
       };
       _face(c, color, cellQuad(h));

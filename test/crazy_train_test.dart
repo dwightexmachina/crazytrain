@@ -1493,6 +1493,58 @@ void main() {
     });
   });
 
+  group('supporting cast', () {
+    test('dynamite craters open ground but not under structures', () {
+      final g = flatGame();
+      g.balance = 1000;
+      expect(g.blast(const Cell(6, 5)), isNull); // open interior ground
+      expect(g.blastsFired, 1);
+      expect(g.balance, 900);
+      expect(g.isWater(const Cell(6, 5)), isTrue, reason: 'crater floods');
+      expect(g.isWater(const Cell(7, 6)), isTrue, reason: '2×2 blast');
+      // Under the starter loop, track pins its vertices: nothing to blast
+      // right on the rails, and a near miss leaves the rails dry.
+      final onTrack = g.blast(const Cell(4, 3));
+      if (onTrack == null) {
+        expect(g.path, isNotNull, reason: 'rails survive a near blast');
+      }
+      expect(g.board[const Cell(4, 3)], isNotNull);
+    });
+
+    test('cow catcher plows cows for a toll instead of stopping', () {
+      final g = flatGame();
+      g.balance = 1000;
+      g.cows.clear();
+      final aheadIdx = (g.s.floor() + 2) % g.path!.length;
+      g.cows.add(Cow(g.path![aheadIdx].cell, 999));
+      g.tick(1.0);
+      expect(g.cowBlocked, isTrue, reason: 'without the catcher: blocked');
+      g.buyCowCatcher();
+      expect(g.cowCatcher, isTrue);
+      final tollBefore = g.balance;
+      var plowed = false;
+      for (var i = 0; i < 20 && !plowed; i++) {
+        g.tick(0.5);
+        plowed = g.cowsPlowed > 0;
+      }
+      expect(plowed, isTrue);
+      expect(g.balance, greaterThanOrEqualTo(tollBefore + 5));
+      expect(g.cowBlocked, isFalse);
+    });
+
+    test('Grand Terminal doubles the lap formula', () {
+      final g = flatGame();
+      g.cows.clear();
+      final plain = g.projectedPayout;
+      g.balance = 2000;
+      g.buyGrandTerminal();
+      expect(g.grandTerminal, isTrue);
+      expect(g.projectedPayout, plain * 2);
+      g.buyGrandTerminal(); // idempotent
+      expect(g.balance, 2000 - Game.priceGrandTerminal);
+    });
+  });
+
   group('route map', () {
     Future<void> toMap(WidgetTester tester) async {
       await tester.pumpWidget(const TrainMakerApp());
